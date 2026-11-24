@@ -1,0 +1,13 @@
+{
+  "skill_name": "cvci-query",
+  "evals": [
+    {"id": 1, "prompt": "CVCI里查浙A8Z3K6的车辆档案", "context": "车牌为合成测试值。", "expectations": ["调用车辆IDENTIFIER匹配", "仅采用complete且autoBind的主体", "从工具事实回答并提供来源"]},
+    {"id": 2, "prompt": "查CVCI虚构示例工地有哪些承运企业", "context": "工地名称为合成测试值。", "expectations": ["匹配工地主体", "同名歧义时先澄清", "关系方向和角色符合工具schema"]},
+    {"id": 3, "prompt": "这辆车现在在哪？", "context": "CVCI上一轮已经唯一确认车辆，位置工具返回LAST_KNOWN。", "expectations": ["调用当前车辆位置工具", "明确最后已知位置及实际定位时间", "不声称当前位置或设备在线"]},
+    {"id": 4, "prompt": "看CVCI浙A8Z3K6昨天9点到11点的轨迹", "context": "车牌为合成测试值。", "expectations": ["以可信本轮日期和Asia/Shanghai解析", "from和until带偏移量且范围不超过24小时", "说明原文、绝对时段及点列截断"]},
+    {"id": 5, "prompt": "CVCI里该车登记关联的核准与当前有效核准分别有哪些", "expectations": ["分别调用登记与当前有效关系", "保留两种业务口径", "不把分页条数当总数"]},
+    {"id": 6, "prompt": "CVCI返回403，说明这辆车没有轨迹吗", "expectations": ["说明是权限不足", "不把403推断为NO_RESULTS", "不尝试绕过数据范围"]},
+    {"id": 7, "prompt": "CVCI里查施工中且已停用的工地", "expectations": ["施工阶段与启停分别筛选", "不按名字含施工中筛选", "保留total与分页"]},
+    {"id": 8, "prompt": "帮我分析上传的车辆销量CSV", "expectations": ["不因车辆关键词触发CVCI业务查询", "使用文件分析能力"]}
+  ]
+}

@@ -1735,6 +1735,8 @@ Skills are what make DeerFlow do *almost anything*.
 
 A standard Agent Skill is a structured capability module — a Markdown file that defines a workflow, best practices, and references to supporting resources. DeerFlow ships with built-in skills for research, report generation, slide creation, web pages, image and video generation, and more. But the real power is extensibility: add your own skills, replace the built-in ones, or combine them into compound workflows.
 
+The optional [`cvci-query`](skills/public/cvci-query/SKILL.md) skill guides authorized CVCI archive, relationship, vehicle position, and trajectory questions through a separately configured `cvci` MCP server. It preserves subject clarification, business filters, time ranges, stale-position warnings, and evidence sources; the external CVCI service remains responsible for access control.
+
 The video-generation skill derives reference-image MIME metadata from `.png`,
 `.jpg`, `.jpeg`, `.webp`, and `.gif` filename extensions (case-insensitive). A
 submitted reference with a missing or unrecognized extension raises a clear error

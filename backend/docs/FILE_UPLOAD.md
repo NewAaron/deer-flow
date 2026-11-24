@@ -115,7 +115,7 @@ DELETE /api/threads/{thread_id}/uploads/{filename}
 
 ## 支持的文档格式
 
-以下格式在显式启用 `uploads.auto_convert_documents: true` 时会自动转换为 Markdown：
+启用 `uploads.auto_convert_documents` 后，以下格式会自动转换为 Markdown：
 - PDF (`.pdf`)
 - PowerPoint (`.ppt`, `.pptx`)
 - Excel (`.xls`, `.xlsx`)
@@ -129,7 +129,7 @@ DELETE /api/threads/{thread_id}/uploads/{filename}
 
 时间戳校验是保守的元数据校验，不能保证文件内容完全一致。Windows 上的 `st_ctime_ns` 可能表示创建时间，因此等长度覆盖后若恢复原 `mtime`，校验可能无法识别变化。
 
-默认情况下，自动转换是关闭的，以避免在网关主机上对不受信任的 Office/PDF 上传执行解析。只有在受信任部署中明确接受此风险时，才应将 `uploads.auto_convert_documents` 设置为 `true`。
+从 `config.example.yaml` 创建新配置时，`uploads.auto_convert_documents` 默认为 `true`。配置缺少该选项时，转换保持关闭。文档由网关解析。如果部署接收不受信任的上传，请在 `config.yaml` 中将该选项设为 `false`。
 
 ## Agent 集成
 
@@ -275,7 +275,7 @@ print(response.json())
 - 上传（HTTP 与嵌入式 `DeerFlowClient`）不会写穿符号链接：目标名已是符号链接的文件会被跳过并列入 `skipped_files`，转换生成的 Markdown 也不会写入同名符号链接
 - 转换读取的是本次上传写入的字节，而非落盘后的文件名：HTTP 上传在 uploads 之外的私有副本上转换，嵌入式客户端转换调用方提供的源文件，因此沙箱替换该文件名无法让宿主文件内容被转换进 uploads
 - 线程隔离：每个线程的上传文件相互隔离，无法跨线程访问
-- 自动文档转换默认关闭；如需启用，需在 `config.yaml` 中显式设置 `uploads.auto_convert_documents: true`
+- 自动文档转换在网关中解析 PDF 和 Office 文件。接收不受信任的上传时，请设置 `uploads.auto_convert_documents: false`
 
 ## 技术实现
 

@@ -1371,9 +1371,10 @@ mounted directory must be writable only by trusted operators.
 
 Upload one or more files to a thread.
 
-Automatic Office/PDF-to-Markdown conversion is disabled by default. To enable
-host-side parsing in a trusted deployment, set
-`uploads.auto_convert_documents: true` in `config.yaml`. See
+The standard configuration template enables automatic Office/PDF-to-Markdown
+conversion for new deployments. If `uploads.auto_convert_documents` is omitted,
+conversion stays off. Set `uploads.auto_convert_documents: false` in `config.yaml`
+if your deployment accepts untrusted uploads. See
 [document conversion configuration](FILE_UPLOAD.md#支持的文档格式).
 
 ```http

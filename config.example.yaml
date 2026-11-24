@@ -1692,9 +1692,8 @@ uploads:
   max_file_size: 52428800    # 50 MiB
   max_total_size: 104857600  # 100 MiB
   # Automatic Office/PDF conversion runs on the backend host before sandbox
-  # isolation applies. Keep this disabled unless uploads come from a fully
-  # trusted source and you intentionally accept host-side parser risk.
-  auto_convert_documents: false
+  # isolation applies. Set this to false if upload sources are not trusted.
+  auto_convert_documents: true
   # Controls which PDF-to-Markdown converter is used whenever PDF conversion
   # runs. Automatic upload conversion is gated separately by
   # auto_convert_documents.

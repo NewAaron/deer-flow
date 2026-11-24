@@ -164,8 +164,10 @@ to a boundary (SQLite) or causing the search to fail (PostgreSQL).
 | `DELETE /api/threads/{id}` | Delete DeerFlow-managed local thread data after LangGraph thread deletion; unexpected failures are logged server-side and return a generic 500 detail |
 | `GET /api/threads/{id}/artifacts/{path}` | Serve generated artifacts |
 
-Automatic document conversion is disabled by default. Trusted deployments can
-enable it with `uploads.auto_convert_documents: true` in `config.yaml`; see
+The standard `config.example.yaml` template enables PDF and Office-to-Markdown
+conversion for new deployments. If `uploads.auto_convert_documents` is omitted,
+conversion stays off. Set `uploads.auto_convert_documents: false` in `config.yaml`
+if your deployment accepts untrusted uploads. See
 [file upload configuration](docs/FILE_UPLOAD.md#支持的文档格式).
 
 Cancelling an upload waits for an already-running document conversion worker to

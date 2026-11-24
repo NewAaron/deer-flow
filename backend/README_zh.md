@@ -134,8 +134,9 @@ FastAPI 应用程序，为前端集成提供 REST 接口：
 | `DELETE /api/threads/{id}` | 删除 LangGraph 线程后，清除由 DeerFlow 管理的本地线程数据；意外错误会记录在服务端，并返回通用的 500 错误信息 |
 | `GET /api/threads/{id}/artifacts/{path}` | 提供生成产物的访问 |
 
-文档自动转换默认关闭。受信任的部署可以在 `config.yaml` 中设置
-`uploads.auto_convert_documents: true` 来启用，详见[文件上传配置](docs/FILE_UPLOAD.md#支持的文档格式)。
+从 `config.example.yaml` 创建新配置时，默认将上传的 PDF 和 Office 文档转换为 Markdown。配置缺少
+`uploads.auto_convert_documents` 时，转换保持关闭。如果接收不受信任的上传，请在 `config.yaml` 中将该选项
+设为 `false`，以关闭网关文档解析。详见[文件上传配置](docs/FILE_UPLOAD.md#支持的文档格式)。
 
 ### 即时通信渠道
 

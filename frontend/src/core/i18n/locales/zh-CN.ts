@@ -2443,6 +2443,11 @@ export const zhCN: Translations = {
       "网关响应时间过长。请确认服务正在运行，然后重试。",
     retry: "重试",
     authFailed: "身份验证失败。",
+    cvciFailure: {
+      title: "CVCI 登录未完成",
+      description: "请确认使用正确的 CVCI 账号和租户后重试。如果问题持续，请联系管理员。",
+      retry: "重新登录 CVCI",
+    },
     errors: {
       sso_failed: "SSO 登录失败，请重试或使用邮箱登录。",
       sso_cancelled: "SSO 登录已取消。",

@@ -20,6 +20,7 @@ from app.gateway.auth import (
     login_throttle,
 )
 from app.gateway.auth.config import get_auth_config
+from app.gateway.auth.cvci import CVCI_PROVIDER, CVCI_SESSION_DURATION, CvciAuthorizationError, CvciGrant, get_cvci_authorization, read_session_reference
 from app.gateway.auth.errors import AuthErrorCode, AuthErrorResponse
 from app.gateway.auth.oidc import OIDCError, OIDCService
 from app.gateway.auth.oidc_state import (
@@ -40,6 +41,7 @@ from app.gateway.csrf_middleware import CSRF_COOKIE_NAME, _request_origin, auth_
 from app.gateway.deps import get_current_user_from_request, get_local_provider
 from app.gateway.utils import constant_time_equals
 from deerflow.config.auth_config import OIDCAuthConfig, OIDCProviderConfig
+from deerflow.mcp.trusted_auth import cvci_oidc_enabled
 from deerflow.persistence.login_throttle import LoginThrottleStore
 
 logger = logging.getLogger(__name__)
@@ -517,6 +519,14 @@ async def register(request: Request, response: Response, body: RegisterRequest):
 @router.post("/logout", response_model=MessageResponse)
 async def logout(request: Request, response: Response):
     """Logout current user by clearing the cookie."""
+    cvci = get_cvci_authorization(request)
+    if cvci is not None:
+        session = read_session_reference(request)
+        if session is not None and session.sid is not None:
+            try:
+                await cvci.logout(session.sid, session.sub)
+            except CvciAuthorizationError:
+                raise HTTPException(status_code=503, detail="CVCI session could not be closed. Please retry sign-out.") from None
     is_https = is_secure_request(request)
     response.delete_cookie(key=ACCESS_TOKEN_COOKIE_NAME, secure=is_https, samesite="lax")
     response.delete_cookie(key=CSRF_COOKIE_NAME, secure=is_https, samesite="strict")
@@ -941,6 +951,8 @@ async def list_auth_providers():
 
     providers = []
     for provider_id, provider_cfg in oidc_config.providers.items():
+        if provider_id == CVCI_PROVIDER and not cvci_oidc_enabled():
+            continue
         providers.append(
             {
                 "id": provider_id,
@@ -957,6 +969,7 @@ async def oauth_login(
     provider: str,
     next: str | None = None,  # noqa: A002 (shadowing built-in is intentional — this is the query param name)
     remember_me: bool = True,
+    cvci_browser_host: str | None = None,
 ):
     """Initiate OIDC login flow.
 
@@ -975,6 +988,14 @@ async def oauth_login(
     provider_config = oidc_config.providers.get(provider)
     if not provider_config:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown SSO provider: {provider}")
+    authorization_endpoint = provider_config.authorization_endpoint
+    if provider == CVCI_PROVIDER:
+        if get_cvci_authorization(request) is None:
+            return _cvci_login_failed(oidc_config)
+        if not (provider_config.pkce_enabled and provider_config.nonce_enabled and provider_config.client_secret):
+            return _cvci_login_failed(oidc_config)
+        remember_me = False
+        authorization_endpoint = _cvci_browser_authorization_endpoint(provider_config, cvci_browser_host)
 
     # Validate `next` / open redirect prevention
     redirect_path = validate_next_param(next) or "/workspace"
@@ -990,7 +1011,8 @@ async def oauth_login(
 
     # Get provider metadata via discovery
     overrides = {
-        "authorization_endpoint": provider_config.authorization_endpoint,
+        "discovery_endpoint": provider_config.discovery_endpoint,
+        "authorization_endpoint": authorization_endpoint,
         "token_endpoint": provider_config.token_endpoint,
         "userinfo_endpoint": provider_config.userinfo_endpoint,
         "jwks_uri": provider_config.jwks_uri,
@@ -999,6 +1021,9 @@ async def oauth_login(
     try:
         metadata = await service.discover(provider_config.issuer, overrides)
     except OIDCError as exc:
+        if provider == CVCI_PROVIDER:
+            logger.warning("CVCI OIDC discovery failed")
+            return _cvci_login_failed(oidc_config)
         logger.error("OIDC discovery failed for provider %s: %s", provider, exc)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to connect to SSO provider")
 
@@ -1027,6 +1052,26 @@ async def oauth_login(
     return redirect_response
 
 
+_CVCI_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1"})
+
+
+def _cvci_browser_authorization_endpoint(provider: OIDCProviderConfig, browser_host: str | None) -> str | None:
+    """Keep the browser on its current loopback origin to retain CVCI login state."""
+    endpoint = provider.authorization_endpoint
+    if not provider.allow_loopback_http or not endpoint or browser_host not in _CVCI_LOOPBACK_HOSTS:
+        return endpoint
+    try:
+        url = urllib.parse.urlsplit(endpoint)
+        port = url.port
+    except ValueError:
+        return endpoint
+    if url.scheme != "http" or url.hostname not in _CVCI_LOOPBACK_HOSTS or not port or url.username is not None or url.password is not None:
+        return endpoint
+    if url.hostname == browser_host:
+        return endpoint
+    return url._replace(netloc=f"{browser_host}:{url.netloc.rsplit(':', 1)[1]}").geturl()
+
+
 @router.get("/callback/{provider}")
 async def oauth_callback(
     request: Request,
@@ -1044,6 +1089,10 @@ async def oauth_callback(
     session cookie.
     """
     oidc_config = await _oidc_config()
+    is_cvci = provider == CVCI_PROVIDER
+    cvci = get_cvci_authorization(request) if is_cvci else None
+    if is_cvci and (error or cvci is None):
+        return _cvci_login_failed(oidc_config)
 
     # ── Provider error ───────────────────────────────────────────────
     if error:
@@ -1062,21 +1111,30 @@ async def oauth_callback(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown SSO provider: {provider}")
 
     if not code or not state:
+        if is_cvci:
+            return _cvci_login_failed(oidc_config)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing code or state parameter")
 
     # ── Verify state cookie ──────────────────────────────────────────
     state_payload = get_state_cookie(request, provider)
     if not state_payload:
+        if is_cvci:
+            return _cvci_login_failed(oidc_config)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Missing or expired OIDC state cookie")
 
     if not constant_time_equals(state_payload.state, state):
+        if is_cvci:
+            return _cvci_login_failed(oidc_config)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="OIDC state mismatch")
+    if is_cvci and not (state_payload.code_verifier and state_payload.nonce and provider_config.pkce_enabled and provider_config.nonce_enabled and provider_config.client_secret):
+        return _cvci_login_failed(oidc_config, request)
 
     # ── Resolve redirect URI ─────────────────────────────────────────
     redirect_uri = _resolve_oidc_redirect_uri(request, provider, provider_config)
 
     # ── Get metadata ─────────────────────────────────────────────────
     overrides = {
+        "discovery_endpoint": provider_config.discovery_endpoint,
         "authorization_endpoint": provider_config.authorization_endpoint,
         "token_endpoint": provider_config.token_endpoint,
         "userinfo_endpoint": provider_config.userinfo_endpoint,
@@ -1086,6 +1144,9 @@ async def oauth_callback(
     try:
         metadata = await service.discover(provider_config.issuer, overrides)
     except OIDCError as exc:
+        if is_cvci:
+            logger.warning("CVCI OIDC discovery failed during callback")
+            return _cvci_login_failed(oidc_config, request)
         logger.error("OIDC discovery failed for provider %s during callback: %s", provider, exc)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to connect to SSO provider")
 
@@ -1103,14 +1164,22 @@ async def oauth_callback(
             auth_method=provider_config.token_endpoint_auth_method,
         )
     except OIDCError as exc:
+        if is_cvci:
+            logger.warning("CVCI OIDC callback authentication failed")
+            return _cvci_login_failed(oidc_config, request)
         logger.error("OIDC callback authentication failed for %s: %s", provider, exc)
         redirect = _build_error_redirect(oidc_config.frontend_base_url, "sso_failed")
         return RedirectResponse(url=redirect, status_code=status.HTTP_302_FOUND)
 
     # ── Provision / link user ────────────────────────────────────────
     try:
+        grant = CvciGrant.from_identity(identity, provider_config.client_id, "") if cvci is not None else None
         result = await get_or_provision_oidc_user(provider, provider_config, identity, get_local_provider())
+    except CvciAuthorizationError:
+        return _cvci_login_failed(oidc_config, request)
     except HTTPException as exc:
+        if is_cvci:
+            return _cvci_login_failed(oidc_config, request)
         error_map = {
             status.HTTP_403_FORBIDDEN: "sso_not_allowed",
             status.HTTP_409_CONFLICT: "sso_account_exists",
@@ -1123,7 +1192,18 @@ async def oauth_callback(
     user = result["user"]
 
     # ── Issue DeerFlow session ───────────────────────────────────────
-    token = create_access_token(str(user.id), token_version=user.token_version)
+    if cvci is not None and grant is not None:
+        try:
+            previous = read_session_reference(request)
+            if previous is not None and previous.sid is not None:
+                await cvci.logout(previous.sid, previous.sub)
+            session_id = await cvci.bind(grant.model_copy(update={"deerFlowUserId": str(user.id)}))
+        except CvciAuthorizationError:
+            logger.warning("Could not establish a CVCI-enabled DeerFlow session")
+            return _cvci_login_failed(oidc_config, request)
+        token = create_access_token(str(user.id), CVCI_SESSION_DURATION, user.token_version, session_id=session_id)
+    else:
+        token = create_access_token(str(user.id), token_version=user.token_version)
 
     # Revalidate as defense-in-depth if future state writers populate this target.
     redirect_target = validate_next_param(state_payload.next_path) or "/workspace"
@@ -1131,9 +1211,11 @@ async def oauth_callback(
     callback_redirect = f"{frontend_base}/auth/callback?next={urllib.parse.quote(redirect_target)}"
 
     redirect_response = RedirectResponse(url=callback_redirect, status_code=status.HTTP_302_FOUND)
+    if is_cvci:
+        redirect_response.headers.update(_CVCI_CALLBACK_HEADERS)
 
     # Set session cookie (reuse existing helper)
-    _set_session_cookie(redirect_response, token, request, remember_me=state_payload.remember_me)
+    _set_session_cookie(redirect_response, token, request, remember_me=False if is_cvci else state_payload.remember_me)
 
     # Set CSRF cookie (callback is a GET, so CSRF middleware won't set it)
     _set_csrf_cookie(redirect_response, request)
@@ -1142,6 +1224,18 @@ async def oauth_callback(
     delete_state_cookie(redirect_response, request, provider)
 
     return redirect_response
+
+
+_CVCI_CALLBACK_HEADERS = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+
+
+def _cvci_login_failed(config: OIDCAuthConfig, request: Request | None = None) -> RedirectResponse:
+    """Keep a failed account switch off the login page's existing-session redirect."""
+    base = config.frontend_base_url or ""
+    response = RedirectResponse(f"{base}/auth/cvci-failed", status_code=302, headers=_CVCI_CALLBACK_HEADERS)
+    if request is not None:
+        delete_state_cookie(response, request, CVCI_PROVIDER)
+    return response
 
 
 def _build_error_redirect(frontend_base_url: str | None, error_code: str) -> str:

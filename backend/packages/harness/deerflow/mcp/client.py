@@ -5,6 +5,7 @@ from typing import Any
 
 from deerflow.config.extensions_config import ExtensionsConfig, McpServerConfig
 from deerflow.mcp.headers import illegal_header_value_reason
+from deerflow.mcp.trusted_auth import cvci_httpx_client_factory, require_trusted_cvci_server
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ def build_server_params(server_name: str, config: McpServerConfig) -> dict[str, 
     """
     transport_type = config.type or "stdio"
     params: dict[str, Any] = {"transport": transport_type}
+    trusted_cvci = require_trusted_cvci_server(server_name, config)
 
     if transport_type == "stdio":
         if not config.command:
@@ -36,7 +38,9 @@ def build_server_params(server_name: str, config: McpServerConfig) -> dict[str, 
         if not config.url:
             raise ValueError(f"MCP server '{server_name}' with {transport_type} transport requires 'url' field")
         params["url"] = config.url
-        if (config.model_extra or {}).get("personal_public_network") is True:
+        if trusted_cvci:
+            params["httpx_client_factory"] = cvci_httpx_client_factory
+        elif (config.model_extra or {}).get("personal_public_network") is True:
             from deerflow.mcp.personal_network import personal_httpx_client_factory
 
             params["httpx_client_factory"] = personal_httpx_client_factory

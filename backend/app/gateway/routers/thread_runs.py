@@ -1021,6 +1021,7 @@ async def stream_run(
         thread_id,
         request,
         idempotency_key=_scope_http_run_idempotency_key(request, thread_id, idempotency_key),
+        cvci_interactive=True,
     )
 
     # Same shape join already rejects: a reused store-only handle on a
@@ -1071,6 +1072,7 @@ async def wait_run(
         thread_id,
         request,
         idempotency_key=_scope_http_run_idempotency_key(request, thread_id, idempotency_key),
+        cvci_interactive=True,
     )
     # Capture before waiting: create_or_reject mutates the shared cached
     # record's idempotency_reused flag, so an overlapping retry must not

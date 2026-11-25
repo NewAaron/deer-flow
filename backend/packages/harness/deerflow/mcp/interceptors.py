@@ -9,6 +9,7 @@ from deerflow.config.extensions_config import ExtensionsConfig
 from deerflow.mcp.config_normalization import normalize_mcp_interceptor_paths
 from deerflow.mcp.context_headers import build_context_headers_interceptor
 from deerflow.mcp.oauth import build_oauth_tool_interceptor
+from deerflow.mcp.trusted_auth import build_trusted_cvci_interceptor
 from deerflow.mcp.user_scoped_auth import build_user_scoped_auth_interceptor
 from deerflow.reflection import resolve_variable
 
@@ -71,6 +72,9 @@ def build_mcp_tool_interceptors(
                 f"Failed to load MCP interceptor {interceptor_path}",
                 exc_info=True,
             )
+    trusted_interceptor = build_trusted_cvci_interceptor(extensions_config)
+    if trusted_interceptor is not None:
+        interceptors.append(trusted_interceptor)
     return interceptors
 
 

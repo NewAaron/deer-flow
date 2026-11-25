@@ -50,7 +50,9 @@ class OIDCProviderConfig(BaseModel):
     nonce_enabled: bool = Field(default=True, description="Include and validate the nonce claim in ID tokens")
 
     # ── Endpoint overrides (for providers with non-standard discovery) ─
+    discovery_endpoint: str | None = Field(default=None, description="Trusted operator-configured URL used to fetch discovery metadata. The issuer in metadata and signed ID tokens must still match the configured issuer.")
     authorization_endpoint: str | None = Field(default=None)
+    allow_loopback_http: bool = Field(default=False, description="Allow the local CVCI browser login to select between localhost and 127.0.0.1 on its configured HTTP authorization port.")
     token_endpoint: str | None = Field(default=None)
     userinfo_endpoint: str | None = Field(default=None)
     jwks_uri: str | None = Field(default=None)

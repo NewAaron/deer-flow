@@ -88,7 +88,7 @@ async def test_oidc_authorization_url_preserves_endpoint_query(endpoint_query, w
         assert parsed.query.startswith(endpoint_query[1:] + "&")
 
 
-async def _start_oidc_login(monkeypatch, provider, path="/api/v1/auth/oauth/keycloak"):
+async def _start_oidc_login(monkeypatch, provider, path="/api/v1/auth/oauth/keycloak", *, provider_key="keycloak"):
     from types import SimpleNamespace
 
     import httpx
@@ -100,13 +100,15 @@ async def _start_oidc_login(monkeypatch, provider, path="/api/v1/auth/oauth/keyc
     from app.gateway.routers import auth as auth_router
 
     service = OIDCService()
-    config = SimpleNamespace(auth=SimpleNamespace(oidc=SimpleNamespace(enabled=True, providers={"keycloak": provider})))
+    config = SimpleNamespace(auth=SimpleNamespace(oidc=SimpleNamespace(enabled=True, providers={provider_key: provider})))
     monkeypatch.setattr(app_config_module, "get_app_config", lambda: config)
     monkeypatch.setattr(auth_router, "_get_oidc_service", lambda: service)
+    if provider_key == "cvci":
+        monkeypatch.setattr(auth_router, "get_cvci_authorization", lambda request: object())
     monkeypatch.setattr(oidc_state, "get_auth_config", lambda: AuthConfig(jwt_secret="test-secret-for-oidc-query-parameters-min-32"))
 
     async def discovery_get(url):
-        assert url == "https://issuer.example.com/.well-known/openid-configuration"
+        assert url == (provider.discovery_endpoint or f"{provider.issuer}/.well-known/openid-configuration")
         return httpx.Response(
             200,
             request=httpx.Request("GET", url),
@@ -146,6 +148,66 @@ async def test_oidc_login_redirect_preserves_configured_endpoint_query(monkeypat
     assert query["state"] == [state.state]
     assert query["nonce"] == [state.nonce]
     assert query["code_challenge"] == [oidc_state.compute_code_challenge(state.code_verifier)]
+
+
+@pytest.mark.asyncio
+async def test_oidc_login_uses_internal_discovery_and_redirects_to_public_authorization(monkeypatch):
+    auth_endpoint = "http://127.0.0.1:18080/sso/oidc/oauth2/authorize"
+    provider = _provider_config(
+        discovery_endpoint="http://cvci-sso:48084/sso/oidc/.well-known/openid-configuration",
+        authorization_endpoint=auth_endpoint,
+        redirect_uri="http://localhost:2026/api/v1/auth/callback/cvci",
+    )
+    response = await _start_oidc_login(monkeypatch, provider)
+
+    assert response.status_code == 302
+    location = response.headers["location"]
+    assert location.split("?", 1)[0] == auth_endpoint
+    assert parse_qs(urlsplit(location).query)["redirect_uri"] == [provider.redirect_uri]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider_key", "allow_loopback_http", "endpoint_origin", "selector", "expected_origin"),
+    [
+        ("cvci", True, "http://127.0.0.1:18080", "localhost", "http://localhost:18080"),
+        ("cvci", True, "http://localhost:18080", "127.0.0.1", "http://127.0.0.1:18080"),
+        ("cvci", True, "http://127.0.0.1:18080", "localhost.example.test", "http://127.0.0.1:18080"),
+        ("cvci", True, "http://127.0.0.1", "localhost", "http://127.0.0.1"),
+        ("cvci", False, "http://127.0.0.1:18080", "localhost", "http://127.0.0.1:18080"),
+        ("cvci", True, "https://127.0.0.1:18080", "localhost", "https://127.0.0.1:18080"),
+        ("keycloak", True, "http://127.0.0.1:18080", "localhost", "http://127.0.0.1:18080"),
+    ],
+)
+async def test_oidc_browser_host_selects_only_configured_cvci_local_alias(monkeypatch, provider_key, allow_loopback_http, endpoint_origin, selector, expected_origin):
+    from app.gateway.auth import oidc_state
+
+    authorization_path = "/sso/oidc/oauth2/authorize"
+    provider = _provider_config(
+        client_secret="test-client-secret",
+        allow_loopback_http=allow_loopback_http,
+        authorization_endpoint=f"{endpoint_origin}{authorization_path}?prompt=login",
+        redirect_uri="http://localhost:2026/api/v1/auth/callback/cvci",
+    )
+    response = await _start_oidc_login(
+        monkeypatch,
+        provider,
+        f"/api/v1/auth/oauth/{provider_key}?cvci_browser_host={selector}",
+        provider_key=provider_key,
+    )
+
+    assert response.status_code == 302
+    location, _, query_string = response.headers["location"].partition("?")
+    assert location == f"{expected_origin}{authorization_path}"
+    query = parse_qs(query_string)
+    assert query["prompt"] == ["login"]
+    assert query["redirect_uri"] == [provider.redirect_uri]
+    assert "cvci_browser_host" not in query
+    state = oidc_state._verify_state_signed(response.cookies[f"df_oidc_state_{provider_key}"])
+    assert state is not None
+    assert query["state"] == [state.state]
+    assert query["nonce"] == [state.nonce]
+    assert query["code_challenge_method"] == ["S256"]
 
 
 @pytest.mark.asyncio
@@ -672,18 +734,96 @@ def _service_answering(responses: dict[str, object]) -> OIDCService:
     return service
 
 
-def _signed_provider() -> tuple[str, dict]:
-    """Return an ID token for ``_ISSUER`` and the JWKS that verifies it."""
+def _signed_provider(issuer: str = _ISSUER) -> tuple[str, dict]:
+    """Return an ID token and the JWKS that verifies it."""
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     now = int(time.time())
     id_token = jwt.encode(
-        {"iss": _ISSUER, "aud": "deer-flow", "sub": "s1", "exp": now + 300, "iat": now, "email": "user@example.com", "email_verified": True},
+        {"iss": issuer, "aud": "deer-flow", "sub": "s1", "exp": now + 300, "iat": now, "email": "user@example.com", "email_verified": True},
         private_key,
         algorithm="RS256",
         headers={"kid": "k1"},
     )
     jwk = RSAAlgorithm.to_jwk(private_key.public_key(), as_dict=True)
     return id_token, {"keys": [{**jwk, "kid": "k1"}]}
+
+
+@pytest.mark.asyncio
+async def test_oidc_http_discovery_keeps_public_issuer_for_metadata_and_signed_tokens(monkeypatch):
+    issuer = "http://127.0.0.1:18080/sso/oidc"
+    internal = "http://cvci-sso:48084/sso/oidc"
+    discovery_url = f"{internal}/.well-known/openid-configuration"
+    token, jwks = _signed_provider(issuer)
+    wrong_issuer_token, wrong_jwks = _signed_provider(internal)
+    service = OIDCService()
+    discovery = {
+        "issuer": issuer,
+        "authorization_endpoint": f"{issuer}/oauth2/authorize",
+        "token_endpoint": f"{issuer}/oauth2/token",
+        "jwks_uri": f"{issuer}/oauth2/jwks",
+    }
+    get = AsyncMock(side_effect=lambda url: httpx.Response(200, json=discovery, request=httpx.Request("GET", url)))
+    monkeypatch.setattr(service._http, "get", get)
+    load_jwks = AsyncMock(return_value=jwks)
+    monkeypatch.setattr(service, "_load_jwks", load_jwks)
+    try:
+        overrides = {"discovery_endpoint": discovery_url, "token_endpoint": f"{internal}/oauth2/token", "jwks_uri": f"{internal}/oauth2/jwks"}
+        metadata = await service.discover(issuer, overrides)
+        get.assert_awaited_once_with(discovery_url)
+        assert metadata.issuer == issuer
+        assert metadata.authorization_endpoint == f"{issuer}/oauth2/authorize"
+        assert metadata.token_endpoint == f"{internal}/oauth2/token"
+        assert (await service.validate_id_token(metadata, "deer-flow", token))["iss"] == issuer
+        load_jwks.assert_awaited_once_with(f"{internal}/oauth2/jwks")
+
+        load_jwks.return_value = wrong_jwks
+        with pytest.raises(OIDCValidationError, match="invalid issuer"):
+            await service.validate_id_token(metadata, "deer-flow", wrong_issuer_token)
+
+        discovery["issuer"] = internal
+        with pytest.raises(OIDCError, match="does not match configured issuer"):
+            await service.discover(issuer, {**overrides, "discovery_endpoint": f"{discovery_url}/alternate"})
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_oidc_discovery_cache_scoped_to_issuer_and_resolved_url(monkeypatch):
+    service = OIDCService()
+    default = f"{_ISSUER}/.well-known/openid-configuration"
+    alternate = "http://oidc-internal.example.test/metadata"
+
+    def fetch(url):
+        document = {**_DISCOVERY, "authorization_endpoint": f"{url}/authorize"}
+        return httpx.Response(200, json=document, request=httpx.Request("GET", url))
+
+    get = AsyncMock(side_effect=fetch)
+    monkeypatch.setattr(service._http, "get", get)
+    try:
+        assert (await service.discover(_ISSUER)).authorization_endpoint == f"{default}/authorize"
+        assert (await service.discover(_ISSUER, {"discovery_endpoint": default})).authorization_endpoint == f"{default}/authorize"
+        assert (await service.discover(_ISSUER, {"discovery_endpoint": alternate})).authorization_endpoint == f"{alternate}/authorize"
+        assert (await service.discover(_ISSUER, {"discovery_endpoint": alternate})).authorization_endpoint == f"{alternate}/authorize"
+        assert [call.args for call in get.await_args_list] == [(default,), (alternate,)]
+        with pytest.raises(OIDCError, match="does not match configured issuer"):
+            await service.discover("https://other.example.test", {"discovery_endpoint": alternate})
+        assert get.await_count == 3
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("discovery_url", ["", "file:///tmp/metadata", "https://user:pass@example.test/metadata", "https://example.test/metadata#fragment"])
+async def test_oidc_rejects_unusable_discovery_override_before_any_fetch(monkeypatch, discovery_url):
+    service = OIDCService()
+    get = AsyncMock()
+    monkeypatch.setattr(service._http, "get", get)
+    try:
+        with pytest.raises(OIDCError, match="Invalid OIDC discovery endpoint"):
+            await service.discover(_ISSUER, {"discovery_endpoint": discovery_url})
+        get.assert_not_awaited()
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio

@@ -1737,6 +1737,8 @@ A standard Agent Skill is a structured capability module — a Markdown file tha
 
 The optional [`cvci-query`](skills/public/cvci-query/SKILL.md) skill guides authorized CVCI archive, relationship, vehicle position, and trajectory questions through a separately configured `cvci` MCP server. It preserves subject clarification, business filters, time ranges, stale-position warnings, and evidence sources; the external CVCI service remains responsible for access control.
 
+When CVCI sign-in is enabled, choose **Sign in with CVCI** or open DeerFlow from the CVCI workbench. Linked DeerFlow accounts retain their chat history, and CVCI checks the signed-in user's current permissions for each archive query.
+
 The video-generation skill derives reference-image MIME metadata from `.png`,
 `.jpg`, `.jpeg`, `.webp`, and `.gif` filename extensions (case-insensitive). A
 submitted reference with a missing or unrecognized extension raises a clear error

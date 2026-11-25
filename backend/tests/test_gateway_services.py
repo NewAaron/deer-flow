@@ -60,6 +60,36 @@ def _run_create_request(content="hello", **kwargs):
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interactive", [True, False])
+async def test_start_run_only_passes_browser_ticket_authority_to_interactive_worker(_stub_app_config, interactive):
+    from unittest.mock import AsyncMock, patch
+
+    from app.gateway.auth_disabled import AUTH_SOURCE_SESSION
+    from app.gateway.services import start_run
+    from deerflow.mcp.trusted_auth import trusted_mcp_ticket_scope
+    from deerflow.runtime import RunManager
+    from deerflow.runtime.runs.store.memory import MemoryRunStore
+
+    owner = SimpleNamespace(id="authenticated-owner", system_role="user", oauth_provider="cvci", oauth_id="cvci:1:2")
+    request = _make_start_run_request(RunManager(store=MemoryRunStore()), auth_source=AUTH_SOURCE_SESSION, state_user=owner)
+    ticket_provider = AsyncMock()
+    with (
+        patch("app.gateway.services.prepare_cvci_ticket_provider", return_value=ticket_provider) as prepare,
+        patch("app.gateway.services.trusted_mcp_ticket_scope", wraps=trusted_mcp_ticket_scope) as scope,
+        patch("app.gateway.services.resolve_agent_factory", return_value=object()),
+        patch("app.gateway.services.run_agent", new_callable=AsyncMock),
+    ):
+        record = await start_run(_run_create_request(), "thread-browser-ticket", request, cvci_interactive=interactive)
+        await record.task
+        if interactive:
+            prepare.assert_called_once_with(request, owner.id)
+            scope.assert_called_once_with(ticket_provider)
+        else:
+            prepare.assert_not_called()
+            scope.assert_called_once_with(None)
+
+
 def test_format_sse_basic():
     from app.gateway.services import format_sse
 

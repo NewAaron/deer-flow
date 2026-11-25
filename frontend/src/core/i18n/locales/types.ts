@@ -2080,6 +2080,7 @@ export interface Translations {
     serviceUnavailableDescription: string;
     retry: string;
     authFailed: string;
+    cvciFailure: { title: string; description: string; retry: string };
     errors: {
       sso_failed: string;
       sso_cancelled: string;

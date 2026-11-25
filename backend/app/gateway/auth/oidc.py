@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
@@ -48,6 +48,7 @@ class OIDCIdentity:
     email_verified: bool
     name: str | None
     claims: dict[str, Any]
+    signed_claims: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
 class OIDCError(Exception):
@@ -88,9 +89,9 @@ def _json_object(resp: httpx.Response, what: str) -> dict[str, Any]:
 class OIDCService:
     """OIDC authentication service.
 
-    Uses in-process caching for provider metadata and JWKS. The cache is
-    keyed by the provider's ``issuer`` — different providers get separate
-    entries. TTLs are configurable via constructor arguments.
+    Uses in-process caching for provider metadata and JWKS. Metadata is keyed
+    by the issuer and the network endpoint used to fetch it. TTLs are
+    configurable via constructor arguments.
     """
 
     def __init__(
@@ -98,7 +99,7 @@ class OIDCService:
         metadata_cache_ttl: float = METADATA_CACHE_TTL,
         jwks_cache_ttl: float = JWKS_CACHE_TTL,
     ) -> None:
-        self._metadata_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._metadata_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
         self._jwks_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._metadata_ttl = metadata_cache_ttl
         self._jwks_ttl = jwks_cache_ttl
@@ -114,14 +115,27 @@ class OIDCService:
         """Fetch and cache OIDC discovery metadata from the issuer.
 
         ``overrides`` may contain endpoint URIs to override discovery values
-        (e.g. for providers with non-standard endpoints).
+        (e.g. for providers with non-standard endpoints). The operator may
+        also set ``discovery_endpoint`` for the fetch without changing the
+        issuer the metadata and signed ID tokens must identify.
         """
+        discovery_url = (overrides or {}).get("discovery_endpoint")
+        if discovery_url is None:
+            discovery_url = issuer.rstrip("/") + OIDC_DISCOVERY_PATH
+        else:
+            try:
+                endpoint = httpx.URL(discovery_url)
+            except httpx.InvalidURL:
+                raise OIDCError("Invalid OIDC discovery endpoint") from None
+            if endpoint.scheme not in {"http", "https"} or not endpoint.host or endpoint.userinfo or endpoint.fragment:
+                raise OIDCError("Invalid OIDC discovery endpoint")
+
         now = time.time()
-        cached = self._metadata_cache.get(issuer)
+        cache_key = (issuer, discovery_url)
+        cached = self._metadata_cache.get(cache_key)
         if cached and now - cached[0] < self._metadata_ttl:
             return self._metadata_from_dict(cached[1], overrides)
 
-        discovery_url = issuer.rstrip("/") + OIDC_DISCOVERY_PATH
         try:
             resp = await self._http.get(discovery_url)
             resp.raise_for_status()
@@ -149,7 +163,7 @@ class OIDCService:
         # Build before caching so a document missing an endpoint is not
         # served from the cache for the rest of the TTL.
         metadata = self._metadata_from_dict(data, overrides)
-        self._metadata_cache[issuer] = (now, data)
+        self._metadata_cache[cache_key] = (now, data)
         return metadata
 
     def _metadata_from_dict(self, data: dict[str, Any], overrides: dict[str, str | None] | None) -> OIDCMetadata:
@@ -478,4 +492,5 @@ class OIDCService:
             email_verified=email_verified,
             name=merged.get("name"),
             claims=merged,
+            signed_claims=claims,
         )

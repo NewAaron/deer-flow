@@ -401,8 +401,10 @@ class SQLiteUserRepository(UserRepository):
             # disabled is account-lifecycle state: only set_disabled writes
             # it (same field-scoping as the role column).
             user.disabled = row.disabled
-            row.oauth_provider = user.oauth_provider
-            row.oauth_id = user.oauth_id
+            # Account linking uses a dedicated field-scoped operation. A
+            # password update must not restore an older OIDC association.
+            user.oauth_provider = row.oauth_provider
+            user.oauth_id = row.oauth_id
             row.needs_setup = user.needs_setup
             row.token_version = user.token_version
             await session.commit()

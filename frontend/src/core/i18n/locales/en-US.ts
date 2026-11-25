@@ -2590,6 +2590,12 @@ export const enUS: Translations = {
       "The Gateway is taking too long to respond. Check that it is running, then try again.",
     retry: "Try again",
     authFailed: "Authentication failed.",
+    cvciFailure: {
+      title: "CVCI sign-in was not completed",
+      description:
+        "Check your CVCI account and tenant, then try again. If the problem continues, contact your administrator.",
+      retry: "Try CVCI sign-in again",
+    },
     errors: {
       sso_failed: "SSO login failed. Please try again or use email login.",
       sso_cancelled: "SSO login was cancelled.",

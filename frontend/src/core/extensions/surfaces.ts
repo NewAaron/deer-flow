@@ -35,6 +35,12 @@ export function mountSurface(
             await context.openConversation!(threadId, abort.signal);
           }
         : undefined,
+      confirmSelection: context.confirmSelection
+        ? async (selection) => {
+            abort.signal.throwIfAborted();
+            await context.confirmSelection!(selection);
+          }
+        : undefined,
       async callBackend(action, payload) {
         abort.signal.throwIfAborted();
         const result = await context.callBackend(action, payload);

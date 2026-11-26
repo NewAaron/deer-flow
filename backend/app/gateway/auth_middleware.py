@@ -53,6 +53,7 @@ _PUBLIC_EXACT_PATHS: frozenset[str] = frozenset(
         "/api/v1/auth/login/local",
         "/api/v1/auth/register",
         "/api/v1/auth/logout",
+        "/api/v1/auth/logout/cleanup",
         "/api/v1/auth/setup-status",
         "/api/v1/auth/initialize",
         "/api/v1/auth/providers",
@@ -138,7 +139,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     )
 
         auth_source = AUTH_SOURCE_SESSION
-        access_token = request.cookies.get("access_token")
+        from app.gateway.auth.browser_session import browser_auth_policy, guard_browser_events, read_browser_token, validate_browser_authorization
+
+        policy = await browser_auth_policy(request)
+        allow_auth_disabled = is_auth_disabled() and policy.required_oidc_provider is None
+        access_token = read_browser_token(request.cookies, strict=policy.required_oidc_provider is not None)
         authorization = request.headers.get("authorization")
         pat_scopes: frozenset[str] = frozenset()
 
@@ -146,7 +151,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if internal_user is not None:
             user = internal_user
             auth_source = AUTH_SOURCE_INTERNAL
-        elif authorization is not None and not is_auth_disabled():
+        elif authorization is not None and not allow_auth_disabled:
             # Bearer (PAT) credential precedence (#4849): a present-but-invalid
             # Authorization header is a hard 401 and never silently falls back
             # to the session cookie. This is also what makes the CSRF
@@ -189,11 +194,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
             try:
                 user = await get_current_user_from_request(request)
             except HTTPException as exc:
-                if not is_auth_disabled():
+                if not allow_auth_disabled:
                     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
                 user = get_auth_disabled_user()
                 auth_source = AUTH_SOURCE_AUTH_DISABLED
-        elif is_auth_disabled():
+        elif allow_auth_disabled:
             user = get_auth_disabled_user()
             auth_source = AUTH_SOURCE_AUTH_DISABLED
         else:
@@ -226,6 +231,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
         request.state.auth = AuthContext(user=user, permissions=permissions)
         token = set_current_user(user)
         try:
-            return await call_next(request)
+            response = await call_next(request)
+            if auth_source == AUTH_SOURCE_SESSION and response.headers.get("content-type", "").startswith("text/event-stream"):
+                policy = await browser_auth_policy(request)
+                if policy.required_oidc_provider is not None:
+                    from app.gateway.auth.cvci import read_session_reference
+
+                    payload = read_session_reference(request)
+
+                    async def revalidate_stream() -> None:
+                        await validate_browser_authorization(request, user, payload)
+
+                    response.body_iterator = guard_browser_events(response.body_iterator, revalidate_stream)
+            return response
         finally:
             reset_current_user(token)

@@ -585,10 +585,13 @@ export default function ChatPage() {
         isMock={isMock}
       >
         <ChatBox threadId={threadId} browserEnabled={browserEnabled}>
-          <div className="relative flex size-full min-h-0 justify-between">
+          <div
+            className="cvci-chat-page relative flex size-full min-h-0 justify-between"
+            data-welcome={isWelcomeMode}
+          >
             <header
               className={cn(
-                "absolute top-0 right-0 left-0 flex h-12 shrink-0 items-center gap-2 px-2 sm:px-4",
+                "cvci-chat-toolbar absolute top-0 right-0 left-0 flex h-12 shrink-0 items-center gap-2 px-2 sm:px-4",
                 isWelcomeMode
                   ? "bg-background/0 z-40 backdrop-blur-none"
                   : "bg-background/80 z-30 shadow-xs backdrop-blur",
@@ -651,7 +654,12 @@ export default function ChatPage() {
               </div>
             </header>
             <main className="flex min-h-0 max-w-full grow flex-col">
-              <div className="flex min-h-0 flex-1 justify-center">
+              <div
+                className={cn(
+                  "flex min-h-0 flex-1 justify-center",
+                  isWelcomeMode && "hidden",
+                )}
+              >
                 <MessageList
                   archiveDownloadsEnabled={
                     isNewThread || isMock || threadMetadata.data != null
@@ -696,31 +704,25 @@ export default function ChatPage() {
               </div>
               <div
                 className={cn(
-                  "right-0 bottom-0 left-0 z-30 flex justify-center px-3 sm:px-4",
-                  isWelcomeMode ? "absolute" : "relative shrink-0 pb-4",
+                  "right-0 bottom-0 left-0 z-20 flex justify-center px-3 sm:px-4",
+                  isWelcomeMode
+                    ? "cvci-home-content relative"
+                    : "relative shrink-0 pb-4",
                 )}
               >
                 <div
                   className={cn(
                     "relative w-full",
-                    isWelcomeMode &&
-                      "-translate-y-[calc(50vh-48px)] sm:-translate-y-[calc(50vh-96px)]",
                     isWelcomeMode
-                      ? "max-w-(--container-width-sm)"
+                      ? "max-w-(--container-width-lg)"
                       : "max-w-(--container-width-md)",
                   )}
                 >
                   {(hasGoal || goalOutcome !== null || hasTodos) && (
-                    <div
-                      className={cn(
-                        "right-0 left-0 z-0",
-                        isWelcomeMode ? "absolute -top-4" : "relative",
-                      )}
-                    >
+                    <div className={cn("relative right-0 left-0 z-0")}>
                       <div
                         className={cn(
-                          "right-0 bottom-0 left-0 flex flex-col",
-                          isWelcomeMode ? "absolute" : "relative",
+                          "relative right-0 bottom-0 left-0 flex flex-col",
                         )}
                       >
                         <GoalStatus
@@ -757,11 +759,16 @@ export default function ChatPage() {
                   )}
                   {mountedRef.current ? (
                     <InputBox
-                      className={cn(
-                        "bg-background/5 w-full",
-                        isWelcomeMode && "-translate-y-2 sm:-translate-y-4",
-                      )}
+                      className="cvci-composer bg-background/5 w-full"
                       isWelcomeMode={isWelcomeMode}
+                      welcomePresentation={
+                        isWelcomeMode &&
+                        !hasGoal &&
+                        !hasTodos &&
+                        searchParams.get("mode") !== "skill"
+                          ? "business"
+                          : undefined
+                      }
                       threadId={threadId}
                       projectId={projectParam ?? affiliatedProjectId}
                       draftThreadId={isNewThread ? "new" : threadId}
@@ -787,7 +794,10 @@ export default function ChatPage() {
                       extraHeader={
                         isWelcomeMode &&
                         !hasGoal &&
-                        !hasTodos && <Welcome mode={settings.context.mode} />
+                        !hasTodos &&
+                        searchParams.get("mode") === "skill" && (
+                          <Welcome mode={settings.context.mode} />
+                        )
                       }
                       disabled={
                         isMock ||
@@ -821,10 +831,7 @@ export default function ChatPage() {
                   ) : (
                     <div
                       aria-hidden="true"
-                      className={cn(
-                        "bg-background/5 h-32 w-full rounded-2xl",
-                        isWelcomeMode && "-translate-y-2 sm:-translate-y-4",
-                      )}
+                      className={cn("bg-background/5 h-32 w-full rounded-2xl")}
                     />
                   )}
                   {env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true" && (

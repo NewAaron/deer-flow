@@ -1,9 +1,10 @@
 """JWT token creation and verification."""
 
+import time
 from datetime import UTC, datetime, timedelta
 
 import jwt
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from app.gateway.auth.config import get_auth_config
 from app.gateway.auth.errors import TokenError
@@ -17,9 +18,10 @@ class TokenPayload(BaseModel):
     iat: datetime | None = None
     ver: int = 0  # token_version — must match User.token_version
     sid: str | None = None  # session-specific reference for external authorization
+    browser_issued_at: int | None = Field(default=None, gt=0)
 
 
-def create_access_token(user_id: str, expires_delta: timedelta | None = None, token_version: int = 0, *, session_id: str | None = None) -> str:
+def create_access_token(user_id: str, expires_delta: timedelta | None = None, token_version: int = 0, *, session_id: str | None = None, browser_session: bool = False) -> str:
     """Create a JWT access token.
 
     Args:
@@ -38,6 +40,8 @@ def create_access_token(user_id: str, expires_delta: timedelta | None = None, to
     payload = {"sub": user_id, "exp": now + expiry, "iat": now, "ver": token_version}
     if session_id is not None:
         payload["sid"] = session_id
+        if browser_session:
+            payload["browser_issued_at"] = time.time_ns()
     return jwt.encode(payload, config.jwt_secret, algorithm="HS256")
 
 

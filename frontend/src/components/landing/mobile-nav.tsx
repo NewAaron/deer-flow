@@ -2,6 +2,7 @@
 
 import { Portal } from "@headlessui/react";
 import { MenuIcon } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -91,7 +92,17 @@ export function MobileNav({
         }}
       >
         <SheetHeader>
-          <SheetTitle className="font-serif text-xl">DeerFlow</SheetTitle>
+          <SheetTitle className="flex items-center gap-2 font-serif text-xl">
+            <Image
+              src="/cvci/emblem.png"
+              width={32}
+              height={32}
+              alt=""
+              unoptimized
+              className="size-8 object-contain"
+            />
+            MSAI
+          </SheetTitle>
         </SheetHeader>
         {search && (
           // Radix's modal scroll lock only allows descendants of its content.

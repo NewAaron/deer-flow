@@ -22,6 +22,7 @@ export const userSchema = z.object({
   // parse unchanged — absent means not disabled.
   disabled: z.boolean().optional(),
   oauth_provider: z.string().nullable().optional().default(null),
+  session_fence: z.string().nullable().optional(),
   // Effective route permissions (RFC #4063 Phase 4). Optional + nullable:
   // absent = pre-Phase-4 backend, null = credential-creation response that
   // never resolved them — both are consumed as "permissive, unresolved", see

@@ -998,6 +998,15 @@ test.describe("Chat workspace", () => {
   test("blocks suggestion template placeholders until replaced", async ({
     page,
   }) => {
+    mockLangGraphAPI(page, {
+      agents: [
+        {
+          name: "template-agent",
+          description: "Native starter template coverage",
+          system_prompt: "You are a test agent.",
+        },
+      ],
+    });
     let streamCalled = false;
     let submittedText: string | undefined;
     await page.route("**/runs/stream", (route) => {
@@ -1023,7 +1032,8 @@ test.describe("Chat workspace", () => {
       return handleRunStream(route);
     });
 
-    await page.goto("/workspace/chats/new");
+    // Native templates remain on Agent welcome pages; the CVCI home has entity pickers.
+    await page.goto("/workspace/agents/template-agent/chats/new");
 
     const textarea = page.getByPlaceholder(/how can i assist you/i);
     await expect(textarea).toBeVisible({ timeout: 15_000 });

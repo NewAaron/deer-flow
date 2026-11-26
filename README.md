@@ -1,5 +1,10 @@
 # 🦌 DeerFlow - 2.0
 
+This local CVCI deployment uses **MSAI** as its interface brand and reuses the
+existing blue brand emblem. Product navigation omits upstream promotional links;
+technical documentation bodies, open-source notices, saved data and protocol
+identifiers retain their original names. See [frontend guidance](frontend/README.md).
+
 English | [中文](./README_zh.md) | [日本語](./README_ja.md) | [Français](./README_fr.md) | [Русский](./README_ru.md) | [Português](./README_pt.md) | [한국어](./README_ko.md)
 
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](./backend/pyproject.toml)
@@ -20,6 +25,14 @@ https://github.com/user-attachments/assets/a8bcadc4-e040-4cf2-8fda-dd768b999c18
 
 Learn more and see **real demos** on our [**official website**](https://deerflow.tech).
 The landing-page case studies open as allowlisted, read-only showcases without requiring a sign-in.
+
+### Local CVCI workspace appearance
+
+This checkout gives `/workspace/*` the Mingshi/CVCI blue workspace appearance in light and dark mode, including menus and dialogs. The four home cards open CVCI record selectors: vehicles by plate, permits by site/vehicle/name/number, projects by name, and devices by number or installation host. Select one record and choose Query to use the native conversation. An empty draft sends immediately; existing text, attachments and references are preserved and the query is appended for manual sending. The selector searches only; the original Agent and CVCI tools read facts and current relationships. Native navigation, quick suggestions, models, follow-ups and file panels remain available.
+
+The operator-installed [`cvci-entities` extension](examples/deerflow-extension-cvci-entities/README.md) requires a current CVCI sign-in and the session-bound MCP read capability. It adds no CVCI business endpoint or database migration. If the extension or authorization is unavailable, the selector offers a retry/sign-in explanation; ordinary chat remains available. Historical associations and the checkpoint primary-device special relationship are outside this first version.
+
+The sidebar's **Search chats** opens the existing authorized conversation list and its search field. Search retains that page's existing pagination and title matching. Login, documentation, landing pages and public artifact previews retain their original appearance.
 
 ## Sister Projects
 
@@ -1738,6 +1751,12 @@ A standard Agent Skill is a structured capability module — a Markdown file tha
 The optional [`cvci-query`](skills/public/cvci-query/SKILL.md) skill guides authorized CVCI archive, relationship, vehicle position, and trajectory questions through a separately configured `cvci` MCP server. It preserves subject clarification, business filters, time ranges, stale-position warnings, and evidence sources; the external CVCI service remains responsible for access control.
 
 When CVCI sign-in is enabled, choose **Sign in with CVCI** or open DeerFlow from the CVCI workbench. Linked DeerFlow accounts retain their chat history, and CVCI checks the signed-in user's current permissions for each archive query.
+
+This CVCI deployment uses localhost:18080/localhost:2026, requires CVCI instead of local password login, and signs the account out on all devices. Failed logout retains its original proof for retry; cleanup pages preserve any different valid account before returning to CVCI login. Operators configure the frontend server's trusted runtime `CVCI_LOGIN_ORIGIN`; generic deployments keep their default authentication policy.
+
+Operators enable the backend policy with `auth.local.enabled: false` and `auth.required_oidc_provider: cvci`, alongside the configured CVCI OIDC provider and bridge. The first setting disables local login, registration, initialization and password changes at the API. The second requires a current session-bound CVCI grant for browser HTTP, WebSocket and LangGraph access, including existing streams, and rejects auth-disabled mode. Deployment revokes old browser credentials once; users sign in again while their account IDs, roles and chat history remain unchanged.
+
+CVCI workspaces are identified by the signed CVCI tenant and user IDs, without requiring a verified contact email. Existing bindings retain their account ID, email, role and history. New accounts are ordinary users and store a stable internal email-shaped identifier; it is not a contact mailbox or a claim of verified email ownership. CVCI never links an existing local account by email. Other OIDC providers retain their configured email-verification and domain policies.
 
 The video-generation skill derives reference-image MIME metadata from `.png`,
 `.jpg`, `.jpeg`, `.webp`, and `.gif` filename extensions (case-insensitive). A

@@ -52,10 +52,13 @@ async function dragPanel(handle: Locator, ...deltas: number[]): Promise<void> {
 
   const box = await handle.boundingBox();
   expect(box).not.toBeNull();
-  const y = box!.y + box!.height / 2;
+  // Stay in the header band above preview iframes so the drag and pointer
+  // release remain in the top-level document at every viewport width.
+  const y = box!.y + Math.min(8, box!.height / 2);
   const x = box!.x + box!.width / 2;
 
   const mouse = handle.page().mouse;
+  await mouse.move(x, y);
   await mouse.down();
   await expect(handle).toHaveAttribute("data-separator", "active");
   let currentX = x;
@@ -113,6 +116,9 @@ test.describe("Artifacts panel resize", () => {
     await expect
       .poll(async () => panelWidth(artifactsPanel))
       .toBeGreaterThan(widthBefore + 100);
+    await page.screenshot({
+      path: test.info().outputPath("artifacts-panel-open.png"),
+    });
   });
 
   test("drag-collapse closes the panel and it can be reopened", async ({

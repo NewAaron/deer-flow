@@ -1,8 +1,20 @@
 # DeerFlow Frontend
 
+This local deployment presents the product as **MSAI**, using the existing blue
+brand emblem throughout the workspace, public navigation, authentication pages,
+browser tabs and notifications. Upstream promotional links are omitted. Technical
+documentation, open-source notices, protocol identifiers and saved data retain
+their original names and formats.
+
 Like the original DeerFlow 1.0, we would love to give the community a minimalistic and easy-to-use web interface with a more modern and flexible architecture.
 
 Switching accounts reloads projects, custom agents, models, and other cached workspace data for the new account. Logging out immediately hides the previous account's data; refreshing the same account preserves its cache.
+
+CVCI account settings show “Managed by CVCI” instead of an email address; internal identity aliases are not contact addresses. CVCI passwords remain managed through SSO. Other OIDC and local account profiles keep their existing email and password behavior.
+
+This CVCI deployment uses `http://localhost:18080` and `http://localhost:2026`. Its public authentication policy disables local password login and requires CVCI, so `/login` starts a fresh CVCI authorization even if an old DeerFlow session exists. Server-rendered pages forward the same scoped session cookies to Gateway for validation, preserving the signed-in workspace across refreshes. Generic deployments retain their local login policy.
+
+For a CVCI session with a server-issued session fence, logout locks the workspace and waits for confirmed sign-out on all devices. A failure retains the original request for retry; an account change stops it. Success clears DeerFlow state, visits the cleanup-only completion pages, then opens CVCI login. Those pages preserve a different valid account and never perform global logout. The frontend server requires a trusted runtime `CVCI_LOGIN_ORIGIN`; unavailable entry or cleanup offers a safe retry page. Generic accounts, CVCI sessions without a strict session fence, and static demos retain their existing logout behavior.
 
 ## Tech Stack
 

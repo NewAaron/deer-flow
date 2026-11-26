@@ -2,12 +2,10 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useTheme } from "next-themes";
-import { useEffect, useContext, useState } from "react";
+import { useEffect, useContext, useRef, useState } from "react";
 
 import { RememberSessionOption } from "@/components/auth/remember-session-option";
 import { Button } from "@/components/ui/button";
-import { FlickeringGrid } from "@/components/ui/flickering-grid";
 import { Input } from "@/components/ui/input";
 import { AuthDisabledContext, useAuth } from "@/core/auth/AuthProvider";
 import { isValidEmail } from "@/core/auth/email";
@@ -28,7 +26,6 @@ export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isAuthenticated } = useAuth();
-  const { theme, resolvedTheme } = useTheme();
   const { t } = useI18n();
 
   const [email, setEmail] = useState("");
@@ -38,6 +35,14 @@ export default function LoginPage() {
   const [ssoProviders, setSsoProviders] = useState<
     { id: string; display_name: string; type: string }[]
   >([]);
+  const [loginPolicyReady, setLoginPolicyReady] = useState(false);
+  const [loginPolicyFailed, setLoginPolicyFailed] = useState(false);
+  const [providerAttempt, setProviderAttempt] = useState(0);
+  const [localLoginEnabled, setLocalLoginEnabled] = useState(false);
+  const [requiredOidcProvider, setRequiredOidcProvider] = useState<
+    string | null
+  >(null);
+  const startedOidc = useRef(false);
   const [setupStatus, setSetupStatus] = useState<SetupStatusResponse | null>(
     null,
   );
@@ -84,10 +89,16 @@ export default function LoginPage() {
   // Redirect if already authenticated. Replace, so Back does not return to a
   // sign-in page that immediately redirects again.
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && loginPolicyReady && !requiredOidcProvider) {
       router.replace(redirectPath);
     }
-  }, [isAuthenticated, redirectPath, router]);
+  }, [
+    isAuthenticated,
+    redirectPath,
+    router,
+    loginPolicyReady,
+    requiredOidcProvider,
+  ]);
 
   useEffect(() => {
     const preference = loadRememberLoginPreference();
@@ -128,26 +139,65 @@ export default function LoginPage() {
   // setup-status retries.
   useEffect(() => {
     let cancelled = false;
+    setLoginPolicyFailed(false);
 
     void fetch("/api/v1/auth/providers")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error("Authentication policy unavailable");
+        return r.json();
+      })
       .then(
         (data: {
           providers: { id: string; display_name: string; type: string }[];
+          local_login_enabled?: boolean;
+          required_oidc_provider?: string | null;
         }) => {
           if (!cancelled) {
+            if (
+              data.required_oidc_provider &&
+              !/^[a-zA-Z0-9_-]+$/.test(data.required_oidc_provider)
+            ) {
+              throw new Error("Invalid authentication policy");
+            }
             setSsoProviders(data.providers ?? []);
+            setLocalLoginEnabled(data.local_login_enabled !== false);
+            setRequiredOidcProvider(data.required_oidc_provider ?? null);
+            setLoginPolicyReady(true);
           }
         },
       )
       .catch(() => {
-        // Ignore errors; no SSO providers shown
+        if (!cancelled) setLoginPolicyFailed(true);
       });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [providerAttempt]);
+
+  useEffect(() => {
+    if (
+      !loginPolicyReady ||
+      !requiredOidcProvider ||
+      errorParam ||
+      ssrDisabled ||
+      startedOidc.current
+    )
+      return;
+    if (!ssoProviders.some((provider) => provider.id === requiredOidcProvider))
+      return;
+    startedOidc.current = true;
+    window.location.replace(
+      `/api/v1/auth/oauth/${requiredOidcProvider}?next=${encodeURIComponent(redirectPath)}&remember_me=false`,
+    );
+  }, [
+    loginPolicyReady,
+    requiredOidcProvider,
+    errorParam,
+    ssrDisabled,
+    ssoProviders,
+    redirectPath,
+  ]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -234,35 +284,49 @@ export default function LoginPage() {
 
   // A signed-in session is already on its way to `redirectPath` (see the
   // effect above), so it never sees the sign-in form.
-  if (isAuthenticated) {
+  if (!loginPolicyReady || (isAuthenticated && !requiredOidcProvider)) {
     return (
       <div className="bg-background flex min-h-screen items-center justify-center">
-        <p className="text-muted-foreground text-sm">{t.login.pleaseWait}</p>
+        {loginPolicyFailed ? (
+          <div role="alert" className="max-w-md space-y-3 p-6">
+            <p>{t.login.serviceUnavailableDescription}</p>
+            <Button
+              type="button"
+              onClick={() => setProviderAttempt((value) => value + 1)}
+            >
+              {t.login.retry}
+            </Button>
+          </div>
+        ) : (
+          <p className="text-muted-foreground text-sm">
+            {ssrDisabled ? t.login.errors.account_disabled : t.login.pleaseWait}
+          </p>
+        )}
       </div>
     );
   }
 
-  const actualTheme = theme === "system" ? resolvedTheme : theme;
-
   return (
     <div className="bg-background relative flex min-h-screen items-center justify-center overflow-x-hidden overflow-y-auto">
-      <FlickeringGrid
-        className="absolute inset-0 z-0 mask-[url(/images/deer.svg)] mask-size-[100vw] mask-center mask-no-repeat md:mask-size-[72vh]"
-        squareSize={4}
-        gridGap={4}
-        color={actualTheme === "dark" ? "white" : "black"}
-        maxOpacity={0.3}
-        flickerChance={0.25}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-0 bg-[url(/cvci/emblem.png)] bg-size-[min(80vw,60vh)] bg-center bg-no-repeat opacity-[0.08]"
       />
       <div className="border-border/20 bg-background/5 w-full max-w-md space-y-6 rounded-3xl border p-8 backdrop-blur-sm">
         <div className="text-center">
-          <h1 className="text-foreground font-serif text-3xl">DeerFlow</h1>
+          <h1 className="text-foreground flex items-center justify-center gap-3 font-serif text-3xl">
+            <span
+              aria-hidden="true"
+              className="size-10 bg-[url(/cvci/emblem.png)] bg-contain bg-center bg-no-repeat"
+            />
+            MSAI
+          </h1>
           <p className="text-muted-foreground mt-2">
             {isLogin ? t.login.signInTitle : t.login.createAccountTitle}
           </p>
         </div>
 
-        {showSetupStatusUnavailable && (
+        {localLoginEnabled && showSetupStatusUnavailable && (
           <div
             role="status"
             aria-live="polite"
@@ -290,7 +354,7 @@ export default function LoginPage() {
           </div>
         )}
 
-        {systemNeedsAdminSetup && (
+        {localLoginEnabled && systemNeedsAdminSetup && (
           <div className="border-l-2 border-blue-500 ps-3 text-sm">
             <p className="font-medium">{t.login.adminSetupRequiredTitle}</p>
             <p className="text-muted-foreground mt-1">
@@ -305,50 +369,58 @@ export default function LoginPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} noValidate className="space-y-2">
-          <div className="flex flex-col space-y-1">
-            <label htmlFor="email" className="text-sm font-medium">
-              {t.login.email}
-            </label>
-            <Input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder={t.login.emailPlaceholder}
-              required
+        {localLoginEnabled && (
+          <form onSubmit={handleSubmit} noValidate className="space-y-2">
+            <div className="flex flex-col space-y-1">
+              <label htmlFor="email" className="text-sm font-medium">
+                {t.login.email}
+              </label>
+              <Input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder={t.login.emailPlaceholder}
+                required
+              />
+            </div>
+            <div className="flex flex-col space-y-1">
+              <label htmlFor="password" className="text-sm font-medium">
+                {t.login.password}
+              </label>
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={t.login.passwordPlaceholder}
+                required
+                minLength={isLogin ? 6 : 8}
+              />
+            </div>
+
+            <RememberSessionOption
+              checked={rememberMe}
+              onCheckedChange={setRememberMe}
             />
-          </div>
-          <div className="flex flex-col space-y-1">
-            <label htmlFor="password" className="text-sm font-medium">
-              {t.login.password}
-            </label>
-            <Input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={t.login.passwordPlaceholder}
-              required
-              minLength={isLogin ? 6 : 8}
-            />
-          </div>
 
-          <RememberSessionOption
-            checked={rememberMe}
-            onCheckedChange={setRememberMe}
-          />
+            {error && <p className="text-sm text-red-500">{error}</p>}
 
-          {error && <p className="text-sm text-red-500">{error}</p>}
+            <Button type="submit" className="w-full" disabled={loading}>
+              {loading
+                ? t.login.pleaseWait
+                : isLogin
+                  ? t.login.signIn
+                  : t.login.createAccount}
+            </Button>
+          </form>
+        )}
 
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading
-              ? t.login.pleaseWait
-              : isLogin
-                ? t.login.signIn
-                : t.login.createAccount}
-          </Button>
-        </form>
+        {!localLoginEnabled && error && (
+          <p role="alert" className="text-sm text-red-500">
+            {error}
+          </p>
+        )}
 
         {ssoProviders.length > 0 && (
           <div className="space-y-2">
@@ -369,24 +441,29 @@ export default function LoginPage() {
                 {t.login.ssoHint}
               </p>
             )}
-            {ssoProviders.map((provider) => (
-              <Button
-                key={provider.id}
-                type="button"
-                variant="outline"
-                className="w-full"
-                disabled={loading}
-                onClick={() => {
-                  window.location.href = `/api/v1/auth/oauth/${provider.id}?next=${encodeURIComponent(redirectPath)}&remember_me=${String(rememberMe)}`;
-                }}
-              >
-                {t.login.continueWith(provider.display_name)}
-              </Button>
-            ))}
+            {ssoProviders
+              .filter(
+                (provider) =>
+                  !requiredOidcProvider || provider.id === requiredOidcProvider,
+              )
+              .map((provider) => (
+                <Button
+                  key={provider.id}
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  disabled={loading}
+                  onClick={() => {
+                    window.location.href = `/api/v1/auth/oauth/${provider.id}?next=${encodeURIComponent(redirectPath)}&remember_me=${String(requiredOidcProvider ? false : rememberMe)}`;
+                  }}
+                >
+                  {t.login.continueWith(provider.display_name)}
+                </Button>
+              ))}
           </div>
         )}
 
-        {regularSignupAllowed && (
+        {localLoginEnabled && regularSignupAllowed && (
           <div className="text-center text-sm">
             <button
               type="button"

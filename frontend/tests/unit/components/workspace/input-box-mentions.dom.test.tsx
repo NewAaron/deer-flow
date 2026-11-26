@@ -20,6 +20,7 @@ import {
 } from "@/components/workspace/mentions/inline-references";
 import { ThreadContext } from "@/components/workspace/messages/context";
 import { AuthProvider } from "@/core/auth/AuthProvider";
+import type { ComposerPickerSelection } from "@/core/extensions/contracts";
 import { DEFAULT_LOCALE } from "@/core/i18n";
 import { I18nProvider } from "@/core/i18n/context";
 import {
@@ -31,6 +32,38 @@ rs.mock("next/navigation", () => ({
   useRouter: () => ({ push: rs.fn(), replace: rs.fn(), refresh: rs.fn() }),
   usePathname: () => "/workspace",
   useSearchParams: () => new URLSearchParams(),
+}));
+
+const pickerSelection = {
+  reference: {
+    namespace: "cvci-entities",
+    provider: "vehicle",
+    id: "fa4c0fc8-ef8c-4adc-89ae-08baf7821a83",
+    label: "浙GA7666",
+  },
+  text: "帮我查询这辆车的档案。",
+};
+let stalePickerConfirm:
+  | ((selection: ComposerPickerSelection) => Promise<void>)
+  | undefined;
+rs.mock("@/components/workspace/composer-picker", () => ({
+  ComposerPicker: ({
+    onConfirm,
+    onClose,
+  }: {
+    onConfirm: (selection: ComposerPickerSelection) => Promise<void>;
+    onClose: () => void;
+  }) => {
+    stalePickerConfirm = onConfirm;
+    return (
+      <div role="dialog">
+        <button onClick={() => void onConfirm(pickerSelection)}>
+          Choose vehicle
+        </button>
+        <button onClick={onClose}>Cancel picker</button>
+      </div>
+    );
+  },
 }));
 
 rs.mock("@/core/models/hooks", () => ({
@@ -281,6 +314,107 @@ function holdAnimationFrames() {
   };
 }
 
+it("keeps the generic starter buttons on the default welcome screen", () => {
+  renderComposer("generic-welcome", rs.fn(), rs.fn(), { isWelcomeMode: true });
+  expect(screen.getByRole("button", { name: "Surprise" })).toBeTruthy();
+});
+
+describe("business picker native submission", () => {
+  it("opens without sending and confirms an empty draft through the native form", async () => {
+    const submit = rs.fn();
+    const { container } = renderComposer("business-empty", submit, rs.fn(), {
+      isWelcomeMode: true,
+      welcomePresentation: "business",
+    });
+    const card = await screen.findByRole("button", { name: /^Vehicles/ });
+    expect(screen.queryByRole("button", { name: "Surprise" })).toBeNull();
+    expect(screen.getByText("DeerFlow is AI and can make mistakes")).toBeTruthy();
+    await waitFor(() =>
+      expect((card as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.click(card);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(submit).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Choose vehicle"));
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+    expect(submit.mock.calls[0]![0].text).toContain("帮我查询这辆车的档案。");
+    expect(
+      submit.mock.calls[0]![1].additionalKwargs.extension_mentions,
+    ).toEqual([pickerSelection.reference]);
+    expect(container.querySelector("form")).toBeTruthy();
+  });
+
+  it("keeps an existing draft verbatim and requires manual sending", async () => {
+    const submit = rs.fn();
+    const { container } = renderComposer("business-existing", submit, rs.fn(), {
+      isWelcomeMode: true,
+      welcomePresentation: "business",
+    });
+    const draft = "Keep this draft and trailing spaces.  ";
+    enterMention(container, draft);
+    const card = await screen.findByRole("button", { name: /^Projects/ });
+    await waitFor(() =>
+      expect((card as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.click(card);
+    fireEvent.click(screen.getByText("Choose vehicle"));
+    const editor = container.querySelector<HTMLElement>(
+      '[contenteditable="true"]',
+    )!;
+    expect(readReferenceEditor(editor).startsWith(`${draft}\n`)).toBe(true);
+    expect(submit).not.toHaveBeenCalled();
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+  });
+
+  it("retains reference chips without automatically sending them", async () => {
+    const token = referenceToken("skill", "research", "research");
+    const draft = `Keep ${token}`;
+    const submit = rs.fn();
+    const { container } = renderComposer(
+      "business-reference",
+      submit,
+      rs.fn(),
+      {
+        initialValue: draft,
+        isWelcomeMode: true,
+        welcomePresentation: "business",
+      },
+    );
+    const card = await screen.findByRole("button", { name: /^Equipment/ });
+    await waitFor(() =>
+      expect((card as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.click(card);
+    fireEvent.click(screen.getByText("Choose vehicle"));
+    const editor = container.querySelector<HTMLElement>(
+      '[contenteditable="true"]',
+    )!;
+    expect(readReferenceEditor(editor).startsWith(`${draft}\n`)).toBe(true);
+    expect(screen.getByTestId("inline-skill-reference").dataset.reference).toBe(
+      token,
+    );
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("rejects a confirmation belonging to a previous conversation", async () => {
+    const submit = rs.fn();
+    const { rerenderThread } = renderComposer("picker-first", submit, rs.fn(), {
+      isWelcomeMode: true,
+      welcomePresentation: "business",
+    });
+    const card = await screen.findByRole("button", { name: /^Vehicles/ });
+    await waitFor(() =>
+      expect((card as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.click(card);
+    const confirm = stalePickerConfirm!;
+    rerenderThread("picker-second");
+    await expect(confirm(pickerSelection)).rejects.toThrow();
+    expect(submit).not.toHaveBeenCalled();
+  });
+});
+
 describe("mention selection focus", () => {
   it("focuses the replacement editor at the canonical insertion caret before the next animation frame", () => {
     const { container } = renderComposer("mention-focus-before-frame");
@@ -333,7 +467,7 @@ describe("mention selection focus", () => {
       '[contenteditable="true"]',
     )!;
     act(() => focusReferenceAt(editor, 2));
-    const picker = screen.getByTestId("add-attachments-button");
+    const picker = screen.getByTestId("mention-button");
     act(() => picker.focus());
     holdAnimationFrames();
     fireEvent.click(picker);
@@ -630,11 +764,16 @@ describe("unified composer mentions", () => {
     enterMention(container, "@");
     expect(screen.queryByRole("option", { name: "Writer brief" })).toBeNull();
   });
-  it("the attachment button opens the same picker", () => {
-    renderComposer();
+  it("opens the native file input directly from the attachment button", () => {
+    const { container } = renderComposer();
+    const fileInput = container.querySelector<HTMLInputElement>(
+      'input[type="file"]',
+    )!;
+    const openFileDialog = rs.spyOn(fileInput, "click");
     fireEvent.click(screen.getByTestId("add-attachments-button"));
-    expect(screen.getByTestId("mention-picker")).toBeTruthy();
-    expect(screen.getByRole("option", { name: "Upload a file" })).toBeTruthy();
+    expect(openFileDialog).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("mention-picker")).toBeNull();
+    openFileDialog.mockRestore();
   });
   it("does not select upload automatically for an unknown query", () => {
     const { container } = renderComposer();

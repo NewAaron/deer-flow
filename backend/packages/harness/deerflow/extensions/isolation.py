@@ -19,9 +19,10 @@ so the wrapper supplies a silent pass-through counterpart when the inner
 implements only one side; otherwise the base class raises
 ``NotImplementedError`` before isolation can fail open.
 
-All first-version contributions are observational, hence fail-open. A future
-intercepting (decision-making) contribution would need to fail closed and must
-opt out of this wrapper explicitly.
+Contributions remain observational and fail open by default. An explicit model
+message projection may append bounded data to the final human content only;
+all other request fields remain host-owned. Its fixed ModelInputRejected error
+can refuse input before the handler runs; tool/lifecycle hooks stay observational.
 """
 
 from __future__ import annotations
@@ -33,10 +34,12 @@ from collections.abc import Awaitable, Callable
 from types import TracebackType
 from typing import Any
 
+from deerflow_extension_api import ModelInputRejected
 from langchain.agents.middleware import AgentMiddleware
 from langgraph.errors import GraphBubbleUp
 
 from deerflow.extensions.loader import Diagnostic
+from deerflow.extensions.message_projection import detached_projection_request, validated_projection_request
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +161,7 @@ class IsolatedMiddleware(AgentMiddleware):
     see the same interface on the wrapper as on the inner middleware itself.
     """
 
-    def __new__(cls, inner: AgentMiddleware, source: str, on_error: Callable[[Diagnostic], None], *, name: str | None = None):
+    def __new__(cls, inner: AgentMiddleware, source: str, on_error: Callable[[Diagnostic], None], *, name: str | None = None, model_message_projection: bool = False):
         if cls is IsolatedMiddleware:
             cls = _wrapper_subclass(_implemented_hooks(inner))
         return super().__new__(cls)
@@ -170,11 +173,15 @@ class IsolatedMiddleware(AgentMiddleware):
         on_error: Callable[[Diagnostic], None],
         *,
         name: str | None = None,
+        model_message_projection: bool = False,
     ) -> None:
         super().__init__()
         self._inner = inner
         self._source = source
         self._on_error = on_error
+        if type(model_message_projection) is not bool:
+            raise ValueError("model_message_projection must be a boolean")
+        self._model_message_projection = model_message_projection
         if name is None:
             inner_name = getattr(inner, "name", type(inner).__name__)
             name = f"extension:{source}:{inner_name}"
@@ -219,6 +226,10 @@ class IsolatedMiddleware(AgentMiddleware):
         """Extension this middleware came from. Read by the provenance map."""
         return self._source
 
+    @property
+    def model_message_projection(self) -> bool:
+        return self._model_message_projection
+
     def _report(self, hook: str, exc: Exception) -> None:
         message = f"{type(self._inner).__name__}.{hook} failed and was skipped: {exc}"
         logger.exception("Extension %s: %s", self._source, message)
@@ -240,6 +251,8 @@ class IsolatedMiddleware(AgentMiddleware):
         handler_error: BaseException | None = None
         handler_error_traceback: TracebackType | None = None
         duplicate_call_error: RuntimeError | None = None
+        projects_messages = self._model_message_projection and hook == "wrap_model_call"
+        projection_baseline = None
 
         def tracked_handler(inner_request: Any) -> Any:
             nonlocal handler_called, duplicate_call_error
@@ -248,15 +261,15 @@ class IsolatedMiddleware(AgentMiddleware):
             if handler_called:
                 duplicate_call_error = RuntimeError(f"{type(self._inner).__name__}.{hook} called the downstream handler more than once")
                 raise duplicate_call_error
+            forwarded = validated_projection_request(request, inner_request, projection_baseline) if projects_messages else request
             handler_called = True
             handler_error = None
             handler_error_traceback = None
             handler_succeeded = False
             try:
-                # The first contract slice is observational: a contributed
-                # wrapper may inspect the request but cannot substitute a new
-                # one after the host's policy/authorization layers have run.
-                handler_result = handler(request)
+                # Only the explicit append-only human data projection may
+                # reach the handler. Other request fields remain host-owned.
+                handler_result = handler(forwarded)
             except BaseException as exc:
                 handler_error = exc
                 handler_error_traceback = exc.__traceback__
@@ -266,7 +279,10 @@ class IsolatedMiddleware(AgentMiddleware):
                 return handler_result
 
         try:
-            inner_hook(request, tracked_handler)
+            observed = request
+            if projects_messages:
+                observed, projection_baseline = detached_projection_request(request)
+            inner_hook(observed, tracked_handler)
             if handler_error is not None:
                 raise handler_error.with_traceback(handler_error_traceback)
             if duplicate_call_error is not None:
@@ -288,6 +304,8 @@ class IsolatedMiddleware(AgentMiddleware):
                 if handler_error is exc:
                     raise
                 raise handler_error.with_traceback(handler_error_traceback) from None
+            if projects_messages and not handler_called and isinstance(exc, ModelInputRejected):
+                raise ModelInputRejected() from None
             self._report(hook, exc)
             if handler_succeeded:
                 return handler_result
@@ -309,6 +327,8 @@ class IsolatedMiddleware(AgentMiddleware):
         handler_error: BaseException | None = None
         handler_error_traceback: TracebackType | None = None
         duplicate_call_error: RuntimeError | None = None
+        projects_messages = self._model_message_projection and hook == "awrap_model_call"
+        projection_baseline = None
 
         async def tracked_handler(inner_request: Any) -> Any:
             nonlocal handler_called, duplicate_call_error
@@ -317,12 +337,13 @@ class IsolatedMiddleware(AgentMiddleware):
             if handler_called:
                 duplicate_call_error = RuntimeError(f"{type(self._inner).__name__}.{hook} called the downstream handler more than once")
                 raise duplicate_call_error
+            forwarded = validated_projection_request(request, inner_request, projection_baseline) if projects_messages else request
             handler_called = True
             handler_error = None
             handler_error_traceback = None
             handler_succeeded = False
             try:
-                handler_result = await handler(request)
+                handler_result = await handler(forwarded)
             except BaseException as exc:
                 handler_error = exc
                 handler_error_traceback = exc.__traceback__
@@ -332,7 +353,10 @@ class IsolatedMiddleware(AgentMiddleware):
                 return handler_result
 
         try:
-            await inner_hook(request, tracked_handler)
+            observed = request
+            if projects_messages:
+                observed, projection_baseline = detached_projection_request(request)
+            await inner_hook(observed, tracked_handler)
             if handler_error is not None:
                 raise handler_error.with_traceback(handler_error_traceback)
             if duplicate_call_error is not None:
@@ -354,6 +378,8 @@ class IsolatedMiddleware(AgentMiddleware):
                 if handler_error is exc:
                     raise
                 raise handler_error.with_traceback(handler_error_traceback) from None
+            if projects_messages and not handler_called and isinstance(exc, ModelInputRejected):
+                raise ModelInputRejected() from None
             self._report(hook, exc)
             if handler_succeeded:
                 return handler_result

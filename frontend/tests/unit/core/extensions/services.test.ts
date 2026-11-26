@@ -88,6 +88,55 @@ test("backend bridge binds installed namespace and propagates administrator disa
   await expect(services.callBackend("stats", {})).rejects.toThrow("403");
 });
 
+test("backend bridge retains a bounded structured error code without forwarding provider messages", async () => {
+  const services = bindFrontendServices(
+    { conversationText, showMessage: rs.fn() },
+    entry,
+  );
+  request.mockResolvedValue(
+    Response.json(
+      {
+        detail: {
+          code: "mcp_read_access_denied",
+          message: "PRIVATE provider payload",
+        },
+      },
+      { status: 403 },
+    ),
+  );
+  await expect(services.callBackend("stats", {})).rejects.toMatchObject({
+    status: 403,
+    code: "mcp_read_access_denied",
+    message: "Plugin action unavailable (403)",
+  });
+});
+
+test("backend bridge leaves malformed error bodies and unsafe codes as ordinary HTTP errors", async () => {
+  const services = bindFrontendServices(
+    { conversationText, showMessage: rs.fn() },
+    entry,
+  );
+  for (const response of [
+    new Response("not JSON", { status: 503 }),
+    Response.json({ detail: "PRIVATE provider message" }, { status: 422 }),
+    Response.json(
+      { detail: { code: "private message with spaces" } },
+      { status: 403 },
+    ),
+    Response.json({ detail: { code: "x".repeat(129) } }, { status: 403 }),
+  ]) {
+    request.mockResolvedValue(response);
+    const failure = await services
+      .callBackend("stats", {})
+      .catch((error: unknown) => error);
+    expect(failure).toMatchObject({
+      status: response.status,
+      message: `Plugin action unavailable (${response.status})`,
+    });
+    expect(failure).not.toHaveProperty("code");
+  }
+});
+
 test("plugin transcript service shares visible-only sanitizer and authenticated sidebar read", async () => {
   const thread = {
     thread_id: "test",

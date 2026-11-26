@@ -7,6 +7,7 @@ import { CommandPalette } from "@/components/workspace/command-palette";
 import { GatewayOfflineBanner } from "@/components/workspace/gateway-offline-banner";
 import { ModelLoadErrorBanner } from "@/components/workspace/model-load-error-banner";
 import { SettingsDialogHost } from "@/components/workspace/settings";
+import { WorkspaceBrandHeader } from "@/components/workspace/workspace-brand";
 import { WorkspaceSettingsDeepLink } from "@/components/workspace/workspace-settings-deep-link";
 import { WorkspaceSidebar } from "@/components/workspace/workspace-sidebar";
 import { ExtensionPageBootstrap } from "@/core/extensions/hooks";
@@ -36,12 +37,18 @@ export async function WorkspaceContent({
     <QueryClientProvider>
       <UserPreferencesBoundary>
         <ExtensionPageBootstrap />
-        <SidebarProvider className="h-screen" defaultOpen={initialSidebarOpen}>
+        <SidebarProvider
+          data-cvci-workspace=""
+          className="cvci-workspace-shell"
+          style={{ "--sidebar-width": "14.5rem" } as React.CSSProperties}
+          defaultOpen={initialSidebarOpen}
+        >
           <WorkspaceSidebar />
           <SidebarInset className="min-w-0">
             <GatewayOfflineBanner gatewayUnavailable={gatewayUnavailable} />
             <ModelLoadErrorBanner gatewayUnavailable={gatewayUnavailable} />
-            {children}
+            <WorkspaceBrandHeader />
+            <div className="cvci-workspace-body">{children}</div>
           </SidebarInset>
         </SidebarProvider>
         <CommandPalette />

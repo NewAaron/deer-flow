@@ -110,6 +110,7 @@ export default function ChatsPage() {
               </TabsList>
             )}
             <Input
+              id="chat-search"
               type="search"
               className="h-12 w-full max-w-(--container-width-md) text-xl"
               placeholder={t.chats.searchChats}

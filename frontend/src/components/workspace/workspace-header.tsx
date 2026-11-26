@@ -1,6 +1,6 @@
 "use client";
 
-import { MessageSquarePlus } from "lucide-react";
+import { MessageSquarePlus, SearchIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -14,6 +14,7 @@ import { useI18n } from "@/core/i18n/hooks";
 import { env } from "@/env";
 import { cn } from "@/lib/utils";
 
+import { WorkspaceBrand } from "./workspace-brand";
 import { useWorkspaceSidebarExpanded } from "./workspace-sidebar-frame";
 import { WorkspaceSidebarTrigger } from "./workspace-sidebar-trigger";
 
@@ -26,7 +27,7 @@ export function WorkspaceHeader({ className }: { className?: string }) {
     <>
       <div
         className={cn(
-          "group/workspace-header flex h-12 flex-col justify-center",
+          "cvci-sidebar-header group/workspace-header flex flex-col justify-center",
           className,
         )}
       >
@@ -38,7 +39,7 @@ export function WorkspaceHeader({ className }: { className?: string }) {
                 isMobile && "hidden",
               )}
             >
-              DF
+              <WorkspaceBrand compact />
             </div>
             <WorkspaceSidebarTrigger
               className={cn(
@@ -50,12 +51,12 @@ export function WorkspaceHeader({ className }: { className?: string }) {
         ) : (
           <div className="flex items-center justify-between gap-2">
             {env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true" ? (
-              <Link href="/" className="text-primary ml-2 font-serif">
-                DeerFlow
+              <Link href="/" className="min-w-0">
+                <WorkspaceBrand />
               </Link>
             ) : (
-              <div className="text-primary ml-2 cursor-default font-serif">
-                DeerFlow
+              <div className="min-w-0 cursor-default">
+                <WorkspaceBrand />
               </div>
             )}
             <WorkspaceSidebarTrigger />
@@ -65,12 +66,25 @@ export function WorkspaceHeader({ className }: { className?: string }) {
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton
+            className="cvci-new-chat"
             isActive={pathname === "/workspace/chats/new"}
             asChild
           >
-            <Link className="text-muted-foreground" href="/workspace/chats/new">
+            <Link href="/workspace/chats/new">
               <MessageSquarePlus size={16} />
               <span>{t.sidebar.newChat}</span>
+            </Link>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            asChild
+            className="cvci-search-chats"
+            tooltip={t.workspaceBrand.searchChats}
+          >
+            <Link href="/workspace/chats#chat-search">
+              <SearchIcon size={16} />
+              <span>{t.workspaceBrand.searchChats}</span>
             </Link>
           </SidebarMenuButton>
         </SidebarMenuItem>

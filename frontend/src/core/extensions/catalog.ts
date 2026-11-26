@@ -16,6 +16,12 @@ export const extensionCatalog = [
     icon: "bookmark",
   },
   {
+    key: "cvciEntities",
+    package: "deerflow-extension-cvci-entities",
+    namespace: "cvci-entities",
+    guide: null,
+  },
+  {
     key: "context",
     package: "deerflow-extension-jev-context",
     namespace: "community.jev-context",
@@ -83,7 +89,10 @@ export function extensionDirectory(
     id: item.namespace ?? `catalog/${item.key}`,
     ...copy[item.key],
     package: item.package,
-    guide: `https://github.com/bytedance/deer-flow/tree/main/examples/${item.package}#readme`,
+    guide:
+      "guide" in item
+        ? (item.guide ?? undefined)
+        : `https://github.com/bytedance/deer-flow/tree/main/examples/${item.package}#readme`,
     icon: "icon" in item ? item.icon : undefined,
     loaded: loaded.find((entry) => entry.namespace === item.namespace),
   }));

@@ -8,10 +8,10 @@ const meta: MetaRecord = {
     title: "Introduction",
   },
   harness: {
-    title: "DeerFlow Harness",
+    title: "MSAI Harness",
   },
   application: {
-    title: "DeerFlow App",
+    title: "MSAI App",
   },
   tutorials: {
     title: "Tutorials",

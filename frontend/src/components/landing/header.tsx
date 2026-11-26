@@ -1,15 +1,12 @@
-import { GitHubLogoIcon } from "@radix-ui/react-icons";
+import Image from "next/image";
 import Link from "next/link";
 import { type ReactNode } from "react";
 
-import { Button } from "@/components/ui/button";
 import { DEFAULT_LOCALE, type Locale } from "@/core/i18n/locale";
 import { getI18n } from "@/core/i18n/server";
-import { env } from "@/env";
 import { cn } from "@/lib/utils";
 
 import { MobileNav } from "./mobile-nav";
-import { StarCounter } from "./star-counter";
 
 export type HeaderProps = {
   className?: string;
@@ -25,7 +22,6 @@ export async function Header({
   locale,
   search,
 }: HeaderProps) {
-  const isExternalHome = !homeURL;
   const { locale: resolvedLocale, t } = await getI18n(locale ?? DEFAULT_LOCALE);
   const lang = resolvedLocale.substring(0, 2);
   return (
@@ -36,14 +32,20 @@ export async function Header({
       )}
     >
       <div className="flex min-w-0 items-center gap-6">
-        <a
-          href={homeURL ?? "https://github.com/bytedance/deer-flow"}
-          target={isExternalHome ? "_blank" : "_self"}
-          rel={isExternalHome ? "noopener noreferrer" : undefined}
-          className="font-serif text-xl whitespace-nowrap"
+        <Link
+          href={homeURL ?? "/"}
+          className="flex items-center gap-2 font-serif text-xl whitespace-nowrap"
         >
-          DeerFlow
-        </a>
+          <Image
+            src="/cvci/emblem.png"
+            width={32}
+            height={32}
+            alt=""
+            unoptimized
+            className="size-8 object-contain"
+          />
+          MSAI
+        </Link>
       </div>
       <nav className="ml-auto hidden items-center gap-5 text-sm font-medium sm:flex md:mr-8 md:gap-8">
         <Link
@@ -60,31 +62,6 @@ export async function Header({
         </Link>
       </nav>
       {search && <div className="hidden w-40 sm:block lg:w-56">{search}</div>}
-      <div className="relative">
-        <div
-          className="pointer-events-none absolute inset-0 z-0 h-full w-full rounded-full opacity-30 blur-2xl"
-          style={{
-            background: "linear-gradient(90deg, #ff80b5 0%, #9089fc 100%)",
-            filter: "blur(16px)",
-          }}
-        />
-        <Button
-          variant="outline"
-          size="sm"
-          asChild
-          className="group relative z-10"
-        >
-          <a
-            href="https://github.com/bytedance/deer-flow"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <GitHubLogoIcon className="size-4" />
-            <span className="hidden sm:inline">Star on GitHub</span>
-            {env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true" && <StarCounter />}
-          </a>
-        </Button>
-      </div>
       <MobileNav
         links={[
           { href: `/${lang}/docs`, label: t.home.docs },

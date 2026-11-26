@@ -585,11 +585,15 @@ class TestRegistryListSubagents:
         assert "general-purpose" in names
         assert "bash" in names
 
-    def test_all_returned_configs_get_global_override(self):
-        from deerflow.subagents.registry import list_subagents
+    def test_all_returned_configs_get_global_override(self, monkeypatch):
+        from deerflow.subagents import registry
+
+        # This tests builtin defaults. Cold managed-store discovery must not
+        # replace this temporary singleton with the operator's AppConfig.
+        monkeypatch.setattr(registry, "_managed_definitions", lambda *, app_config=None: ())
 
         _reset_subagents_config(timeout_seconds=123, max_turns=77)
-        for cfg in list_subagents():
+        for cfg in registry.list_subagents():
             assert cfg.timeout_seconds == 123, f"{cfg.name} has wrong timeout"
             assert cfg.max_turns == 77, f"{cfg.name} has wrong max_turns"
 

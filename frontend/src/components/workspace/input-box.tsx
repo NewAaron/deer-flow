@@ -78,6 +78,7 @@ import {
   buildConversationReferenceMetadata,
   type ConversationReference,
 } from "@/core/conversation-references";
+import type { ComposerPickerSelection } from "@/core/extensions/contracts";
 import {
   extensionMentionId,
   MAX_EXTENSION_MENTIONS,
@@ -156,6 +157,9 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 
+import { BusinessWelcome } from "./business-welcome";
+import { ComposerPicker, type ComposerPickerTarget } from "./composer-picker";
+import { appendComposerSelection } from "./composer-picker-selection";
 import {
   abortGoalRequest,
   beginGoalRequest,
@@ -331,6 +335,7 @@ export function InputBox({
   context,
   extraHeader,
   isWelcomeMode,
+  welcomePresentation,
   threadId,
   draftThreadId = threadId,
   projectId,
@@ -368,6 +373,8 @@ export function InputBox({
    * decoupled from "the backend has created the thread" — see issue #2746.
    */
   isWelcomeMode?: boolean;
+  /** Business welcome shows the branded cards in place of generic starter buttons. */
+  welcomePresentation?: "business";
   threadId: string;
   draftThreadId?: string;
   projectId?: string | null;
@@ -460,6 +467,11 @@ export function InputBox({
   const setTextInput = textInput.setInput;
   const sidecar = useMaybeSidecar();
   const attachmentParts = attachments.files;
+  const [composerPicker, setComposerPicker] = useState<
+    (ComposerPickerTarget & { generation: number; lifetime: number }) | null
+  >(null);
+  const pickerConfirmedRef = useRef(false);
+  const pickerGenerationRef = useRef(0);
   // References belong to the draft and clear only when its send proceeds.
   const [conversationReferences, setConversationReferences] = useState<
     ConversationReference[]
@@ -2913,7 +2925,114 @@ export function InputBox({
     }
   }, []);
 
-  return (
+  const openComposerPicker = useCallback(
+    (index: number, opener: HTMLButtonElement) => {
+      if (
+        composerLocked ||
+        status === "streaming" ||
+        hydratedDraftKey !== draftKey
+      )
+        return;
+      const surfaceId = [
+        "vehicle-record",
+        "permit-query",
+        "project-info",
+        "device-record",
+      ][index];
+      if (!surfaceId) return;
+      pickerConfirmedRef.current = false;
+      setComposerPicker({
+        namespace: "cvci-entities",
+        surfaceId,
+        title: t.workspaceBrand.starters[index]!.title,
+        draftKey,
+        opener,
+        generation: ++pickerGenerationRef.current,
+        lifetime: composerLifetimeRef.current,
+      });
+    },
+    [
+      composerLocked,
+      draftKey,
+      hydratedDraftKey,
+      status,
+      t.workspaceBrand.starters,
+    ],
+  );
+
+  const focusComposer = useCallback(() => {
+    if (inlineSkillTextRef.current) {
+      focusContentEditableEnd(inlineSkillTextRef.current);
+    } else {
+      const textarea = textareaRef.current;
+      textarea?.focus();
+      if (textarea)
+        textarea.setSelectionRange(
+          textarea.value.length,
+          textarea.value.length,
+        );
+    }
+  }, []);
+
+  const confirmComposerPicker = useCallback(
+    async (selection: ComposerPickerSelection) => {
+      if (
+        !composerPicker ||
+        composerPicker.generation !== pickerGenerationRef.current ||
+        composerPicker.lifetime !== composerLifetimeRef.current ||
+        composerPicker.draftKey !== draftKey ||
+        hydratedDraftKey !== draftKey ||
+        pickerConfirmedRef.current ||
+        composerLocked ||
+        status === "streaming"
+      )
+        throw new Error("Composer changed. Reopen the picker.");
+      pickerConfirmedRef.current = true;
+      try {
+        const current = textInput.value ?? "";
+        const hasDraft =
+          current.length > 0 ||
+          attachmentParts.length > 0 ||
+          projectAttachments.length > 0 ||
+          conversationReferences.length > 0 ||
+          (sidecar?.conversationQuotes.length ?? 0) > 0;
+        const next = appendComposerSelection(
+          current,
+          selection,
+          composerPicker.namespace,
+        );
+        acceptedDraftRef.current = null;
+        pendingDraftSubmissionRef.current = null;
+        // Flush the canonical reference editor and native form callback together.
+        // The original form retains all upload/model/mode/run admission gates.
+        flushSync(() => {
+          textInput.setInput(next);
+          setMentionQuery(null);
+          setMentionButtonOpen(false);
+          setComposerPicker(null);
+        });
+        if (!hasDraft) requestFormSubmit();
+      } catch (error) {
+        pickerConfirmedRef.current = false;
+        throw error;
+      }
+    },
+    [
+      composerPicker,
+      draftKey,
+      hydratedDraftKey,
+      composerLocked,
+      status,
+      textInput,
+      attachmentParts.length,
+      projectAttachments.length,
+      conversationReferences.length,
+      sidecar?.conversationQuotes.length,
+      requestFormSubmit,
+    ],
+  );
+
+  const composer = (
     <div
       ref={promptRootRef}
       className={cn(
@@ -3240,7 +3359,6 @@ export function InputBox({
               </PromptInputButton>
             </Tooltip>
             <AddAttachmentsButton
-              onOpen={openMentions}
               className="px-2!"
               disabled={composerLocked}
               uploadLimits={uploadLimits}
@@ -3595,6 +3713,7 @@ export function InputBox({
       )}
 
       {isWelcomeMode &&
+        welcomePresentation !== "business" &&
         searchParams.get("mode") !== "skill" &&
         !showCommandSuggestions &&
         !showMentions && (
@@ -3634,6 +3753,36 @@ export function InputBox({
         </DialogContent>
       </Dialog>
     </div>
+  );
+
+  return (
+    <>
+      {isWelcomeMode && welcomePresentation === "business" && (
+        <BusinessWelcome
+          disabled={
+            composerLocked ||
+            status === "streaming" ||
+            hydratedDraftKey !== draftKey ||
+            !canCreateRuns
+          }
+          onSelect={openComposerPicker}
+        />
+      )}
+      {composer}
+      {composerPicker?.draftKey === draftKey && (
+        <ComposerPicker
+          key={`${draftKey}:${composerPicker.surfaceId}`}
+          target={composerPicker}
+          threadId={threadId}
+          onClose={() => {
+            pickerGenerationRef.current += 1;
+            setComposerPicker(null);
+          }}
+          onConfirm={confirmComposerPicker}
+          focusComposer={focusComposer}
+        />
+      )}
+    </>
   );
 }
 
@@ -3746,9 +3895,7 @@ function AddAttachmentsButton({
   className,
   disabled,
   uploadLimits,
-  onOpen,
 }: {
-  onOpen?: () => void;
   className?: string;
   disabled?: boolean;
   uploadLimits?: UploadLimits;
@@ -3769,7 +3916,7 @@ function AddAttachmentsButton({
         className={cn("px-2!", className)}
         data-testid="add-attachments-button"
         disabled={disabled}
-        onClick={onOpen ?? (() => attachments.openFileDialog())}
+        onClick={attachments.openFileDialog}
       >
         <PaperclipIcon className="size-3" />
       </PromptInputButton>

@@ -33,6 +33,7 @@ class OIDCStatePayload(BaseModel):
     code_verifier: str | None = Field(default=None, description="PKCE code verifier, sent during token exchange")
     next_path: str = Field(default="/workspace", description="Redirect target after successful auth")
     remember_me: bool = Field(default=True, description="Whether the resulting DeerFlow session should be persistent")
+    browser_session_fence: str | None = Field(default=None, description="Optional initiating browser generation; never a credential")
     issued_at: float = Field(default_factory=time.time, description="Unix timestamp of cookie creation")
 
 

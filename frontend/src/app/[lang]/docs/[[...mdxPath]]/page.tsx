@@ -7,7 +7,15 @@ export const generateStaticParams = generateStaticParamsFor("mdxPath");
 export async function generateMetadata(props) {
   const params = await props.params;
   const { metadata } = await importPage(params.mdxPath, params.lang);
-  return metadata;
+  return {
+    ...metadata,
+    ...(typeof metadata.title === "string" && {
+      title: metadata.title.replaceAll("DeerFlow", "MSAI"),
+    }),
+    ...(typeof metadata.description === "string" && {
+      description: metadata.description.replaceAll("DeerFlow", "MSAI"),
+    }),
+  };
 }
 
 // eslint-disable-next-line @typescript-eslint/unbound-method

@@ -3533,11 +3533,16 @@ authorization:
 # registration, so on an SSO-provisioned deployment leaving this open lets a visitor
 # create an account outside that policy. Set allow_registration: false there.
 #
-# The first admin account is always created through /initialize regardless of this
-# setting, so turning it off cannot lock you out of a fresh install.
+# With local.enabled: true, /initialize remains available for the first admin.
+# Set local.enabled: false to reject every local password/setup endpoint.
 
 # auth:
+#   # Optional strict CVCI browser policy: requires local.enabled: false,
+#   # oidc.enabled: true, and a configured cvci provider. Every browser request
+#   # validates its session-bound CVCI grant; auth-disabled mode is incompatible.
+#   # required_oidc_provider: cvci
 #   local:
+#     enabled: true
 #     allow_registration: false
 #     # Login throttling per client IP. The client IP is X-Real-IP from a
 #     # proxy listed in AUTH_TRUSTED_PROXIES (the Docker stack trusts its

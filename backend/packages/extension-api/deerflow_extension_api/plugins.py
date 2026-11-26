@@ -6,14 +6,42 @@ and an authenticated principal for each admitted call; this is not a sandbox.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 from deerflow_extension_api.agent_runs import AgentRuns
 from deerflow_extension_api.auth import ExtensionPrincipal
+from deerflow_extension_api.host_capabilities import HostCapabilityError
 from deerflow_extension_api.settings import FrontendBinding, SettingsContribution, SettingsField, SettingValue
+
+
+@dataclass(frozen=True)
+class McpReadTool:
+    """An exact deployment tool a browser action may ask the host to read."""
+
+    server: str
+    tool: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.server, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", self.server):
+            raise ValueError("Invalid MCP read server")
+        if not isinstance(self.tool, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", self.tool):
+            raise ValueError("Invalid MCP read tool")
+
+
+class SessionMcpReader(Protocol):
+    """Action-lifetime, host-authorized reads. Credentials never cross this API.
+
+    Returns a bounded JSON CallToolResult envelope with content,
+    structuredContent and isError. Raises HostCapabilityError on refusal.
+    The declaration is an allowlist, not proof of the current user's authority.
+    """
+
+    async def call(self, server: str, tool: str, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+        raise HostCapabilityError("mcp_read_unavailable", "This host does not provide session MCP reads.")
 
 
 @dataclass(frozen=True)
@@ -23,12 +51,20 @@ class ActionContext:
     agent_runs: AgentRuns | None = field(default=None, kw_only=True)
     # Host-stamped browser session; model tools and other callers default closed.
     interaction: Literal["session", "other"] = field(default="other", kw_only=True)
+    mcp_reader: SessionMcpReader | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)
 class BackendAction:
     name: str
     handler: Callable[[Mapping[str, Any], ActionContext], Awaitable[Any]]
+    mcp_reads: tuple[McpReadTool, ...] = field(default=(), kw_only=True)
+
+    def __post_init__(self) -> None:
+        bindings = tuple(self.mcp_reads)
+        if any(not isinstance(item, McpReadTool) for item in bindings):
+            raise ValueError("MCP reads must declare exact deployment tools")
+        object.__setattr__(self, "mcp_reads", bindings)
 
 
 @dataclass(frozen=True)

@@ -138,7 +138,7 @@ class LocalAuthProvider(AuthProvider):
         """Create a new user from an OAuth/OIDC login.
 
         Args:
-            email: Verified email from the OIDC provider
+            email: Unique email-shaped identifier supplied by the trusted provisioner
             oauth_provider: Provider ID (e.g. 'keycloak', 'google')
             oauth_id: User's subject claim from the ID token
             system_role: Role to assign ("admin" or "user")

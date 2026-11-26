@@ -10,7 +10,10 @@ import React, {
   type ReactNode,
 } from "react";
 
+import { getCsrfHeaders } from "@/core/api/fetcher";
 import { useArtifactDraftOwner } from "@/core/artifacts/draft-context";
+import { enUS } from "@/core/i18n/locales/en-US";
+import { zhCN } from "@/core/i18n/locales/zh-CN";
 
 import { isStaticWebsiteOnly } from "../static-mode";
 
@@ -74,6 +77,14 @@ export function AuthProvider({
   const authQueryScope = authKnown ? (user?.id ?? null) : undefined;
   useArtifactDraftOwner(authQueryScope);
   const [isLoading, setIsLoading] = useState(false);
+  const [logoutPhase, setLogoutPhase] = useState<
+    "pending" | "failed" | "changed" | null
+  >(null);
+  const logoutOriginRef = React.useRef<{
+    id: string;
+    fence: string | null | undefined;
+  } | null>(null);
+  const logoutInFlightRef = React.useRef(false);
   // Logout and externally confirmed users supersede pending auth refreshes.
   const authRequestRef = React.useRef(0);
   const authRefreshInFlightRef = React.useRef(false);
@@ -90,6 +101,9 @@ export function AuthProvider({
    * so consumers don't reach into React internals.
    */
   const applyUser = useCallback((next: User | null) => {
+    logoutOriginRef.current = null;
+    logoutInFlightRef.current = false;
+    setLogoutPhase(null);
     authRequestRef.current++;
     authRefreshInFlightRef.current = false;
     reconnectPendingRef.current = false;
@@ -103,7 +117,7 @@ export function AuthProvider({
    * Used when initialUser might be stale (e.g., after tab was inactive)
    */
   const refreshUser = useCallback(async () => {
-    if (staticMode) return;
+    if (staticMode || logoutOriginRef.current) return;
     const requestId = ++authRequestRef.current;
     authRefreshInFlightRef.current = true;
 
@@ -163,6 +177,52 @@ export function AuthProvider({
    * logout used to.
    */
   const logout = useCallback(async () => {
+    const logoutProvider = user?.oauth_provider;
+    if (
+      !staticMode &&
+      ((logoutProvider === "cvci" && user?.session_fence) ||
+        logoutOriginRef.current)
+    ) {
+      if (logoutInFlightRef.current) return;
+      logoutOriginRef.current ??= { id: user!.id, fence: user?.session_fence };
+      const original = logoutOriginRef.current;
+      if (!original.fence) {
+        setLogoutPhase("failed");
+        return;
+      }
+      logoutInFlightRef.current = true;
+      const requestId = ++authRequestRef.current;
+      authRefreshInFlightRef.current = false;
+      reconnectPendingRef.current = false;
+      setIsLoading(false);
+      setLogoutPhase("pending");
+      try {
+        const response = await fetch("/api/v1/auth/logout", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json", ...getCsrfHeaders() },
+          body: JSON.stringify({ expected_session: original.fence }),
+        });
+        if (requestId !== authRequestRef.current) return;
+        if (!response.ok) {
+          setLogoutPhase(
+            response.status === 409 || response.status === 401
+              ? "changed"
+              : "failed",
+          );
+          return;
+        }
+        setUser(null);
+        setAuthKnown(true);
+        window.location.assign("/auth/cvci-logout-complete");
+      } catch {
+        if (requestId === authRequestRef.current) setLogoutPhase("failed");
+      } finally {
+        if (requestId === authRequestRef.current)
+          logoutInFlightRef.current = false;
+      }
+      return;
+    }
     // Immediately clear local state to prevent UI flicker
     authRequestRef.current++;
     authRefreshInFlightRef.current = false;
@@ -195,9 +255,13 @@ export function AuthProvider({
       return;
     }
 
+    if (logoutProvider === "cvci" && typeof window !== "undefined") {
+      window.location.assign("/auth/cvci-logout");
+      return;
+    }
     // Redirect to home page
     router.push("/");
-  }, [staticMode, router]);
+  }, [staticMode, router, user]);
 
   /**
    * Revalidate visible tabs, including unknown auth after a transport failure.
@@ -213,7 +277,7 @@ export function AuthProvider({
   );
 
   useEffect(() => {
-    if (staticMode) return;
+    if (staticMode || logoutPhase) return;
 
     const checkUser = (reconnecting = false) => {
       if (user === null && authKnown) return;
@@ -247,7 +311,7 @@ export function AuthProvider({
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("online", handleOnline);
     };
-  }, [staticMode, user, authKnown, isLoading, refreshUser]);
+  }, [staticMode, user, authKnown, isLoading, refreshUser, logoutPhase]);
 
   const value: AuthContextType = {
     user,
@@ -257,11 +321,46 @@ export function AuthProvider({
     refreshUser,
     applyUser,
   };
+  const logoutCopy =
+    typeof document !== "undefined" &&
+    document.documentElement.lang.startsWith("zh")
+      ? zhCN.login.sharedLogout
+      : enUS.login.sharedLogout;
 
   return (
     <AuthContext.Provider value={value}>
       <AuthQueryScopeContext.Provider value={authQueryScope}>
-        {children}
+        {logoutPhase ? (
+          <main className="bg-background text-foreground flex min-h-screen flex-col items-center justify-center gap-4 p-6">
+            <p role={logoutPhase === "pending" ? "status" : "alert"}>
+              {logoutPhase === "pending"
+                ? logoutCopy.pending
+                : logoutPhase === "changed"
+                  ? logoutCopy.changed
+                  : logoutCopy.failed}
+            </p>
+            {logoutPhase === "failed" && (
+              <button
+                type="button"
+                className="text-primary underline"
+                onClick={() => void logout()}
+              >
+                {logoutCopy.retry}
+              </button>
+            )}
+            {logoutPhase === "changed" && (
+              <button
+                type="button"
+                className="text-primary underline"
+                onClick={() => window.location.reload()}
+              >
+                {logoutCopy.reload}
+              </button>
+            )}
+          </main>
+        ) : (
+          children
+        )}
       </AuthQueryScopeContext.Provider>
     </AuthContext.Provider>
   );

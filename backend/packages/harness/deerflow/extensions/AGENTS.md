@@ -233,6 +233,14 @@ capability, so a single-sided wrapper receives a pass-through counterpart; imple
 both sides when the extension must observe both synchronous and asynchronous execution
 paths.
 
+`MiddlewarePlacement.model_message_projection` is a strict boolean, default
+false, supported only at model placements. Its isolated model wrapper accepts
+only a detached append-only text suffix on the final human content (16 KiB);
+history, message metadata and all other request fields remain host-owned. Only
+the fixed public `ModelInputRejected()` can reject before handler invocation.
+Tool/lifecycle hooks and ordinary failures keep the original isolation policy.
+The opt-in participates in assembly policy parameters and the fingerprint.
+
 Lead runs and subagents allocate an `ExtensionData` task store only when middleware,
 task-lifecycle, or system-model observation is registered; services and routers are
 app-scoped and do not allocate one. Middleware and system-call sites recover the

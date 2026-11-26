@@ -7,8 +7,16 @@ import { ArtifactDraftsProvider } from "@/core/artifacts/draft-context";
 import { DEFAULT_LOCALE } from "@/core/i18n/locale";
 
 export const metadata: Metadata = {
-  title: "DeerFlow",
-  description: "A LangChain-based framework for building super agents.",
+  title: "MSAI",
+  description: "MSAI 智能助手，为工作提供智能问答、数据分析与任务协作。",
+  icons: {
+    icon: [
+      { url: "/favicon.ico?v=msai-20261126" },
+      { url: "/cvci/emblem.png", type: "image/png" },
+    ],
+    shortcut: "/favicon.ico?v=msai-20261126",
+    apple: "/cvci/emblem.png",
+  },
 };
 
 export default function RootLayout({

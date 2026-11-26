@@ -16,6 +16,7 @@ export function AccountSettingsPage() {
   const { user, logout } = useAuth();
   const { t } = useI18n();
   const isSsoUser = Boolean(user?.oauth_provider);
+  const isCvciUser = user?.oauth_provider === "cvci";
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -74,10 +75,20 @@ export function AccountSettingsPage() {
       <SettingsSection title={t.settings.account.profileTitle}>
         <div className="space-y-2">
           <div className="grid grid-cols-[max-content_max-content] items-center gap-4">
-            <span className="text-muted-foreground text-sm">
-              {t.settings.account.email}
-            </span>
-            <span className="text-sm font-medium">{user?.email ?? "—"}</span>
+            {isCvciUser ? (
+              <span className="text-muted-foreground col-span-2 text-sm">
+                {t.settings.account.cvciManaged}
+              </span>
+            ) : (
+              <>
+                <span className="text-muted-foreground text-sm">
+                  {t.settings.account.email}
+                </span>
+                <span className="text-sm font-medium">
+                  {user?.email ?? "—"}
+                </span>
+              </>
+            )}
             <span className="text-muted-foreground text-sm">
               {t.settings.account.role}
             </span>

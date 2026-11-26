@@ -68,3 +68,23 @@ class MiddlewarePlacement:
     placement: Placement
     scope: AgentScope = AgentScope.BOTH
     order: int = 0
+    #: Opt into bounded, append-only data on the final human model message.
+    #: Other request fields, tool wrappers and lifecycle hooks stay observational.
+    model_message_projection: bool = field(default=False, kw_only=True)
+
+    def __post_init__(self) -> None:
+        if type(self.model_message_projection) is not bool:
+            raise ValueError("model_message_projection must be a boolean")
+        if self.model_message_projection and self.placement not in (Placement.MODEL_LOGICAL, Placement.MODEL_PHYSICAL):
+            raise ValueError("Model message projection requires a model placement")
+
+
+class ModelInputRejected(ValueError):
+    """Explicit pre-model input refusal for opted-in message projectors.
+
+    The host recreates this fixed error before surfacing it. Do not include
+    labels, identifiers, credentials or arbitrary provider errors in a refusal.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("所选引用无效，请重新选择后查询。")

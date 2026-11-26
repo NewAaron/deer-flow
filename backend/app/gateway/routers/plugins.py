@@ -137,8 +137,10 @@ async def invoke_plugin_action(request: Request, namespace: str, action_name: st
     """Invoke an installed action with the authenticated viewer and deployment settings."""
     from deerflow_extension_api.agent_runs import AgentRunError, resolve_agent_runs
     from deerflow_extension_api.auth import resolve_principal
+    from deerflow_extension_api.host_capabilities import HostCapabilityError
     from deerflow_extension_api.plugins import ActionContext
 
+    from app.gateway.session_mcp_reader import mcp_read_http_error, session_mcp_reader_scope
     from deerflow.extensions.plugin_tools import plugin_settings
 
     principal = resolve_principal(request)
@@ -180,17 +182,22 @@ async def invoke_plugin_action(request: Request, namespace: str, action_name: st
     try:
         async with asyncio.timeout(30):
             runs = resolve_agent_runs(request)
-            return await action.handler(
-                MappingProxyType(payload),
-                ActionContext(
-                    principal,
-                    MappingProxyType(settings),
-                    agent_runs=runs.for_plugin(namespace) if runs is not None else None,
-                    interaction="session" if getattr(request.state, "auth_source", None) == "session" and not principal.is_internal else "other",
-                ),
-            )
+            with session_mcp_reader_scope(request, principal, action.mcp_reads) as mcp_reader:
+                return await action.handler(
+                    MappingProxyType(payload),
+                    ActionContext(
+                        principal,
+                        MappingProxyType(settings),
+                        agent_runs=runs.for_plugin(namespace) if runs is not None else None,
+                        interaction="session" if getattr(request.state, "auth_source", None) == "session" and not principal.is_internal else "other",
+                        mcp_reader=mcp_reader,
+                    ),
+                )
     except AgentRunError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
+    except HostCapabilityError as exc:
+        status_code, detail = mcp_read_http_error(exc.code)
+        raise HTTPException(status_code, detail) from None
     except TimeoutError as exc:
         raise HTTPException(504, "Plugin action timed out.") from exc
     except ValueError as exc:

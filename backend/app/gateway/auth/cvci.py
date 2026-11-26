@@ -19,7 +19,6 @@ from redis.exceptions import RedisError
 from app.gateway.auth.errors import TokenError
 from app.gateway.auth.jwt import TokenPayload, decode_token
 from app.gateway.auth.oidc import OIDCIdentity
-from app.gateway.auth.session_cookie import ACCESS_TOKEN_COOKIE_NAME
 from app.gateway.auth_disabled import AUTH_SOURCE_SESSION
 from deerflow.mcp.headers import illegal_header_value_reason
 from deerflow.mcp.trusted_auth import TicketProvider, cvci_httpx_client_factory, cvci_oidc_enabled
@@ -36,6 +35,10 @@ _SESSION_KEY_PREFIX = "deerflow:cvci:oidc-session:"
 
 class CvciAuthorizationError(Exception):
     """A safe verdict without credentials or remote response details."""
+
+
+class CvciSessionInvalid(CvciAuthorizationError):
+    """An authoritative rejection, distinct from a temporary authority failure."""
 
 
 def cvci_subject(tenant_id: str, user_id: str) -> str:
@@ -119,10 +122,14 @@ class CvciAuthorization:
     async def _post(self, operation: str, data: dict[str, str]) -> object:
         try:
             response = await self._client.post(f"{self._bridge_url}/{operation}", json=data, headers={"X-CVCI-DeerFlow-Key": self._bridge_key})
+            if response.status_code in {401, 403}:
+                raise CvciSessionInvalid("CVCI authorization was rejected")
             response.raise_for_status()
             payload = response.json()
         except (httpx.HTTPError, ValueError):
             raise CvciAuthorizationError("CVCI authorization service is unavailable") from None
+        if isinstance(payload, dict) and type(payload.get("code")) is int and payload["code"] in {401, 403}:
+            raise CvciSessionInvalid("CVCI authorization was rejected")
         if not isinstance(payload, dict) or type(payload.get("code")) is not int or payload["code"] != 0:
             raise CvciAuthorizationError("CVCI authorization was rejected")
         return payload.get("data")
@@ -169,6 +176,44 @@ class CvciAuthorization:
         if grant is not None:
             await self._revoke_upstream(grant)
 
+    async def check(self, session_id: str, owner: str) -> None:
+        grant = await self._lookup(session_id, owner)
+        if grant is None:
+            raise CvciSessionInvalid("CVCI session expired")
+        if await self._post("grant/check", grant.principal()) is not True:
+            raise CvciAuthorizationError("Invalid CVCI authorization result")
+
+    async def logout_all(self, session_id: str, owner: str) -> None:
+        grant = await self._lookup(session_id, owner)
+        receipt_key = f"{_SESSION_KEY_PREFIX}logout-completed:{session_id}"
+        if grant is None:
+            try:
+                if await self._redis.get(receipt_key) == owner:
+                    return
+            except RedisError:
+                raise CvciAuthorizationError("CVCI session storage is unavailable") from None
+            raise CvciSessionInvalid("CVCI session expired")
+        data = await self._post("grant/logout-all", grant.principal())
+        if not isinstance(data, dict) or data.get("status") not in {"completed", "already_completed"}:
+            raise CvciAuthorizationError("CVCI global sign-out was not confirmed")
+        # Keep the original association until upstream confirms. A failed call
+        # can then retry with A's proof even if this browser now displays B.
+        script = """
+        local raw = redis.call('GET', KEYS[1])
+        if raw and raw ~= ARGV[1] then return 0 end
+        local receipt = redis.call('GET', KEYS[2])
+        if receipt and receipt ~= ARGV[2] then return 0 end
+        redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
+        redis.call('DEL', KEYS[1])
+        return 1
+        """
+        try:
+            saved = await self._redis.eval(script, 2, f"{_SESSION_KEY_PREFIX}{session_id}", receipt_key, grant.model_dump_json(), owner, int(CVCI_SESSION_DURATION.total_seconds()))
+        except RedisError:
+            raise CvciAuthorizationError("CVCI sign-out receipt could not be saved; retry sign-out.") from None
+        if saved != 1:
+            raise CvciAuthorizationError("CVCI sign-out receipt could not be saved; retry sign-out.")
+
     async def ticket(self, session_id: str, owner: str) -> str:
         grant = await self._lookup(session_id, owner)
         if grant is None:
@@ -191,7 +236,9 @@ def get_cvci_authorization(request: Request) -> CvciAuthorization | None:
 
 
 def read_session_reference(request: Request) -> TokenPayload | None:
-    token = request.cookies.get(ACCESS_TOKEN_COOKIE_NAME)
+    from app.gateway.auth.browser_session import read_browser_token
+
+    token = read_browser_token(request.cookies)
     if not token:
         return None
     payload = decode_token(token)

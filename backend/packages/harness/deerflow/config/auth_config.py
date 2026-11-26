@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from deerflow.config.reload_boundary import format_field_description
 
@@ -100,6 +100,8 @@ def resolve_login_throttle_storage(selector: LoginThrottleStorage | str | None, 
 class LocalAuthConfig(BaseModel):
     """Configuration for the built-in email/password authentication provider."""
 
+    enabled: bool = Field(default=True, description="Enable local password authentication and local credential creation. Disabling also rejects existing local browser sessions.")
+
     allow_registration: bool = Field(
         default=True,
         description=(
@@ -152,3 +154,11 @@ class AuthAppConfig(BaseModel):
 
     oidc: OIDCAuthConfig = Field(default_factory=OIDCAuthConfig, description="OIDC SSO authentication settings")
     local: LocalAuthConfig = Field(default_factory=LocalAuthConfig, description="Built-in email/password authentication settings")
+    required_oidc_provider: Literal["cvci"] | None = Field(default=None, description="Require an online CVCI-authorized browser session on every interactive surface. Local password authentication must be disabled.")
+
+    @model_validator(mode="after")
+    def validate_required_provider(self) -> AuthAppConfig:
+        if self.required_oidc_provider is not None:
+            if self.local.enabled or not self.oidc.enabled or self.required_oidc_provider not in self.oidc.providers:
+                raise ValueError("A required OIDC provider needs enabled SSO, its configured provider and disabled local authentication")
+        return self

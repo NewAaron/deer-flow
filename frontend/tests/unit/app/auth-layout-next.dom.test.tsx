@@ -160,7 +160,7 @@ describe("auth routes without a session", () => {
 
     await renderAuthRoute({ tag: "unauthenticated" }, <LoginPage />);
 
-    expect(screen.getByLabelText(enUS.login.email)).toBeTruthy();
+    expect(await screen.findByLabelText(enUS.login.email)).toBeTruthy();
     expect(replace).not.toHaveBeenCalled();
     expect(push).not.toHaveBeenCalled();
   });

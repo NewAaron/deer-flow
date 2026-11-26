@@ -328,6 +328,8 @@ def describe_middleware(middleware: object) -> MiddlewareDescriptor:
             parameters = {"error": "UnserialisableDeclaration"}
     else:
         parameters = {"probed": True, **_probe_middleware_parameters(described)}
+    if getattr(middleware, "model_message_projection", False) is True:
+        parameters = {**parameters, "extension_model_message_projection": True}
     return MiddlewareDescriptor(
         name=name,
         module=type(described).__module__,

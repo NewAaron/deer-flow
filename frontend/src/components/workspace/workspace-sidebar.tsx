@@ -32,7 +32,12 @@ export function WorkspaceSidebar({
   useThreadActivity();
   return (
     <ThreadDeleteDialogProvider>
-      <WorkspaceSidebarFrame variant="sidebar" collapsible="icon" {...props}>
+      <WorkspaceSidebarFrame
+        variant="sidebar"
+        collapsible="icon"
+        className="cvci-sidebar"
+        {...props}
+      >
         <WorkspaceSidebarContents />
       </WorkspaceSidebarFrame>
     </ThreadDeleteDialogProvider>

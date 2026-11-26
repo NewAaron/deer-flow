@@ -29,7 +29,12 @@ rs.mock("next/navigation", () => ({
   usePathname: () => navigation.pathname,
 }));
 rs.mock("@/core/i18n/hooks", () => ({
-  useI18n: () => ({ t: { sidebar: { newChat: "New chat" } } }),
+  useI18n: () => ({
+    t: {
+      sidebar: { newChat: "New chat" },
+      workspaceBrand: { name: "Mingshi AI", searchChats: "Search chats" },
+    },
+  }),
 }));
 rs.mock("@/env", () => ({
   env: { NEXT_PUBLIC_STATIC_WEBSITE_ONLY: "false" },

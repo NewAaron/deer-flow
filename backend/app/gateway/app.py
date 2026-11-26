@@ -14,7 +14,7 @@ from deerflow_extension_api import (
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.gateway.auth_disabled import AUTH_SOURCE_INTERNAL, AUTH_SOURCE_PAT, is_auth_disabled, warn_if_auth_disabled_enabled
+from app.gateway.auth_disabled import AUTH_SOURCE_INTERNAL, AUTH_SOURCE_PAT, is_auth_disabled, is_auth_disabled_requested, warn_if_auth_disabled_enabled
 from app.gateway.auth_middleware import AuthMiddleware
 from app.gateway.browser_capability import ensure_browser_runtime_available
 from app.gateway.config import get_gateway_config
@@ -629,10 +629,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # SIGINT handlers that destroy every sandbox before uvicorn starts the run
     # drain. `_runtime_with_mcp_pool_shutdown` closes the provider afterwards.
     with hold_sandbox_shutdown_ownership():
+        from app.gateway.auth.browser_session import browser_auth_policy
         from app.gateway.auth.cvci import CvciAuthorization
         from deerflow.mcp.trusted_auth import cvci_oidc_enabled
 
         cvci_enabled = cvci_oidc_enabled()
+        policy = await browser_auth_policy()
+        app.state.browser_auth_policy = policy
+        if policy.required_oidc_provider and (is_auth_disabled_requested() or not cvci_enabled):
+            raise RuntimeError("Required CVCI sessions need enabled CVCI integration and browser authentication")
         if cvci_enabled and is_auth_disabled():
             raise RuntimeError("CVCI OIDC requires DeerFlow browser authentication")
         cvci_authorization = await asyncio.to_thread(CvciAuthorization.from_env) if cvci_enabled else None

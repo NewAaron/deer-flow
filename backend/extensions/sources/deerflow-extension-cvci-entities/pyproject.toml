@@ -1,0 +1,32 @@
+[project]
+name = "deerflow-extension-cvci-entities"
+version = "0.1.1"
+description = "CVCI archive search pickers and turn-scoped entity references"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = ["deerflow-extension-api>=0.2.10,<0.3", "langchain>=1.2,<2"]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[project.entry-points."deerflow.extensions"]
+cvci-entities = "deerflow_extension_cvci_entities:install"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["deerflow_extension_cvci_entities"]
+
+# Keep lint ownership stable both here and in the managed backend snapshot.
+[tool.ruff]
+line-length = 240
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["deerflow_extension_cvci_entities"]

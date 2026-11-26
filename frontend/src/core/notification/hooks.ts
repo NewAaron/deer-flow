@@ -80,7 +80,11 @@ export function useNotification(): UseNotificationReturn {
       }
       lastNotificationTime.current = now;
 
-      const notification = new Notification(title, options);
+      const notification = new Notification(title, {
+        icon: "/cvci/emblem.png",
+        badge: "/cvci/emblem.png",
+        ...options,
+      });
 
       // Optional: Add event listeners
       notification.onclick = () => {

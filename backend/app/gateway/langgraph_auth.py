@@ -255,6 +255,12 @@ async def authenticate(request):
       cookie → decode JWT → DB lookup → token_version match
     Also enforces CSRF on state-changing methods.
     """
+    from app.gateway.auth.browser_session import browser_auth_policy, read_browser_token, validate_browser_authorization
+
+    policy = await browser_auth_policy()
+    if policy.required_oidc_provider is not None and is_auth_disabled():
+        raise Auth.exceptions.HTTPException(status_code=401, detail="SSO authentication is required")
+
     # CSRF check before authentication so forged cross-site requests
     # are rejected early, even if the cookie carries a valid JWT.
     _check_csrf(request)
@@ -262,7 +268,7 @@ async def authenticate(request):
     if is_auth_disabled():
         return AUTH_DISABLED_USER_ID
 
-    token = request.cookies.get("access_token")
+    token = read_browser_token(request.cookies, strict=policy.required_oidc_provider is not None)
     if not token:
         raise Auth.exceptions.HTTPException(
             status_code=401,
@@ -295,6 +301,10 @@ async def authenticate(request):
             detail="Token revoked (password changed)" if failure is AuthErrorCode.TOKEN_INVALID else "Account disabled",
         )
 
+    try:
+        await validate_browser_authorization(request, user, payload, standalone=True)
+    except HTTPException as exc:
+        raise Auth.exceptions.HTTPException(status_code=exc.status_code, detail=exc.detail) from None
     return payload.sub
 
 

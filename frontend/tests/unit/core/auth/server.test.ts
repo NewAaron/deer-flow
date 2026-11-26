@@ -56,6 +56,178 @@ async function loadFreshServerAuth() {
   return await import("@/core/auth/server");
 }
 
+describe("getServerSideUser — generation-scoped browser cookies", () => {
+  let saved: EnvSnapshot;
+  const sidA = "a".repeat(43);
+  const sidB = "b".repeat(43);
+  const user = {
+    id: "cvci-user",
+    email: "cvci-t3-u42@cvci.identity.example.com",
+    system_role: "user",
+    oauth_provider: "cvci",
+    session_fence: "server-fence",
+  };
+
+  beforeEach(() => {
+    saved = snapshotEnv();
+    for (const key of ENV_KEYS) setEnv(key, undefined);
+  });
+
+  afterEach(() => {
+    restoreEnv(saved);
+    rs.unstubAllGlobals();
+    rs.doUnmock("next/headers");
+  });
+
+  function mockCookies(values: Record<string, string>, status = 200) {
+    rs.doMock("next/headers", () => ({
+      cookies: rs.fn(async () => ({
+        get: (name: string) =>
+          name in values ? { name, value: values[name] } : undefined,
+        getAll: () =>
+          Object.entries(values).map(([name, value]) => ({ name, value })),
+      })),
+    }));
+    const fetchSpy = rs.fn(
+      async (url: string, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify(
+            url.endsWith("/setup-status")
+              ? { needs_setup: false }
+              : status === 200
+                ? user
+                : { detail: { code: "session_invalid" } },
+          ),
+          { status, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    rs.stubGlobal("fetch", fetchSpy);
+    return fetchSpy;
+  }
+
+  test("forwards a named-only session to the fixed Gateway me endpoint", async () => {
+    const fetchSpy = mockCookies({ [`deerflow_session_${sidA}`]: "opaque-a" });
+    const { getServerSideUser } = await loadFreshServerAuth();
+    await expect(getServerSideUser()).resolves.toMatchObject({
+      tag: "authenticated",
+      user: { id: user.id },
+    });
+    expect(fetchSpy).toHaveBeenCalledExactlyOnceWith(
+      "http://127.0.0.1:8001/api/v1/auth/me",
+      expect.objectContaining({
+        cache: "no-store",
+        headers: { Cookie: `deerflow_session_${sidA}=opaque-a` },
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  test("forwards both generations and the stale selector without choosing an identity", async () => {
+    const fetchSpy = mockCookies({
+      access_token: "generic-legacy",
+      [`deerflow_session_${sidA}`]: "opaque-a",
+      deerflow_active_session: sidA,
+      [`deerflow_session_${sidB}`]: "opaque-b",
+      csrf_token: "csrf-not-authentication",
+      cvci_token: "upstream-secret",
+      next: "https://attacker.invalid",
+      deerflow_session_persistent: "1",
+      deerflow_session_invalid: "ignored",
+    });
+    const { getServerSideUser } = await loadFreshServerAuth();
+    await expect(getServerSideUser()).resolves.toMatchObject({
+      tag: "authenticated",
+    });
+    const init = fetchSpy.mock.calls[0]![1]!;
+    const forwarded = new Headers(init.headers)
+      .get("cookie")!
+      .split("; ")
+      .sort();
+    expect(forwarded).toEqual(
+      [
+        "access_token=generic-legacy",
+        `deerflow_active_session=${sidA}`,
+        `deerflow_session_${sidA}=opaque-a`,
+        `deerflow_session_${sidB}=opaque-b`,
+      ].sort(),
+    );
+  });
+
+  test("a selector alone never authenticates or sends a me request", async () => {
+    const fetchSpy = mockCookies({ deerflow_active_session: sidA });
+    const { getServerSideUser } = await loadFreshServerAuth();
+    await expect(getServerSideUser()).resolves.toEqual({
+      tag: "unauthenticated",
+    });
+    expect(
+      fetchSpy.mock.calls.every(([url]) => url.endsWith("/setup-status")),
+    ).toBe(true);
+  });
+
+  test("preserves the generic legacy access_token path", async () => {
+    const fetchSpy = mockCookies({
+      access_token: "generic-legacy",
+      unrelated: "private",
+    });
+    const { getServerSideUser } = await loadFreshServerAuth();
+    await expect(getServerSideUser()).resolves.toMatchObject({
+      tag: "authenticated",
+    });
+    expect(fetchSpy.mock.calls[0]![1]!.headers).toEqual({
+      Cookie: "access_token=generic-legacy",
+    });
+  });
+
+  test("leaves forged or revoked named-session rejection to Gateway", async () => {
+    const fetchSpy = mockCookies(
+      { [`deerflow_session_${sidA}`]: "not-a-JWT" },
+      401,
+    );
+    const { getServerSideUser } = await loadFreshServerAuth();
+    await expect(getServerSideUser()).resolves.toEqual({
+      tag: "unauthenticated",
+    });
+    expect(fetchSpy.mock.calls[0]![0]).toBe(
+      "http://127.0.0.1:8001/api/v1/auth/me",
+    );
+  });
+
+  test("fails closed on an oversized named-cookie jar rather than truncating to an older identity", async () => {
+    const values = Object.fromEntries(
+      Array.from({ length: 33 }, (_, index) => [
+        `deerflow_session_${String(index).padStart(16, "0")}`,
+        "opaque",
+      ]),
+    );
+    values.access_token = "must-not-revive-legacy";
+    const fetchSpy = mockCookies(values);
+    const { getServerSideUser } = await loadFreshServerAuth();
+    await expect(getServerSideUser()).resolves.toEqual({
+      tag: "unauthenticated",
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    "opaque; injected=secret",
+    "opaque\r\nX-Injected: secret",
+    "x".repeat(8193),
+  ])(
+    "rejects unsafe or oversized cookie values without logging them",
+    async (value) => {
+      const fetchSpy = mockCookies({ [`deerflow_session_${sidA}`]: value });
+      const consoleSpy = rs.spyOn(console, "error");
+      const { getServerSideUser } = await loadFreshServerAuth();
+      await expect(getServerSideUser()).resolves.toEqual({
+        tag: "unauthenticated",
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(consoleSpy).not.toHaveBeenCalled();
+      consoleSpy.mockRestore();
+    },
+  );
+});
+
 describe("getServerSideUser", () => {
   let saved: EnvSnapshot;
 
@@ -135,6 +307,7 @@ describe("getServerSideUser — gateway_unavailable contract (issue #3493)", () 
       cookies: rs.fn(async () => ({
         get: (name: string) =>
           name === "access_token" ? { value: "stub-token" } : undefined,
+        getAll: () => [],
       })),
     }));
     const abortErr = new DOMException("Aborted", "AbortError");
@@ -155,6 +328,7 @@ describe("getServerSideUser — gateway_unavailable contract (issue #3493)", () 
       cookies: rs.fn(async () => ({
         get: (name: string) =>
           name === "access_token" ? { value: "stub-token" } : undefined,
+        getAll: () => [],
       })),
     }));
     rs.stubGlobal(
@@ -190,6 +364,7 @@ describe("getServerSideUser — account_disabled contract", () => {
       cookies: rs.fn(async () => ({
         get: (name: string) =>
           name === "access_token" ? { value: "stub-token" } : undefined,
+        getAll: () => [],
       })),
     }));
   });
@@ -274,6 +449,7 @@ describe("getServerSideUser — accepts every address the backend accepts", () =
       cookies: rs.fn(async () => ({
         get: (name: string) =>
           name === "access_token" ? { value: "stub-token" } : undefined,
+        getAll: () => [],
       })),
     }));
   });

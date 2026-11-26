@@ -430,9 +430,22 @@ test.describe("Sidebar navigation", () => {
       expect(box!.x + box!.width).toBeLessThanOrEqual(viewportWidth + 1);
     };
 
-    await expectInsideViewport(page.getByText(/欢迎使用 🦌 DeerFlow/).first());
+    const welcome = page.getByRole("region", { name: "数据成链，一问就清" });
+    await expectInsideViewport(
+      welcome.getByRole("heading", { name: "数据成链，一问就清", level: 1 }),
+    );
+    const description = welcome.locator(".cvci-welcome-description");
+    await expect(description).toHaveText(
+      "查询业务档案、分析资料，让复杂任务有据可循。",
+    );
+    await expectInsideViewport(description);
+    const starters = welcome.locator(".cvci-starter-card");
+    await expect(starters).toHaveCount(4);
+    for (const starter of await starters.all()) {
+      await expectInsideViewport(starter);
+    }
     await expectInsideViewport(page.getByRole("textbox").first());
-    await expectInsideViewport(page.locator("[data-slot='suggestions-list']"));
+    await expectInsideViewport(page.getByTestId("add-attachments-button"));
 
     const mobileSidebarTrigger = page
       .locator("[data-sidebar='trigger']:visible")
@@ -466,5 +479,40 @@ test.describe("Sidebar navigation", () => {
     await expect(
       mobileSidebar.locator("a[href='/workspace/agents']"),
     ).toBeVisible();
+  });
+
+  test("mobile Agent welcome keeps native starter suggestions within viewport", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await context.addCookies([
+      { name: "locale", value: "zh-CN", url: baseURL! },
+    ]);
+    await page.setViewportSize({ width: 390, height: 664 });
+    mockLangGraphAPI(page, {
+      agents: [
+        {
+          name: "mobile-template-agent",
+          description: "Native mobile starter coverage",
+          system_prompt: "You are a test agent.",
+        },
+      ],
+    });
+    await page.goto("/workspace/agents/mobile-template-agent/chats/new");
+    const suggestions = page.locator("[data-slot='suggestions-list']");
+    await expect(suggestions).toBeVisible({ timeout: 15_000 });
+    await expect(suggestions.getByRole("button").first()).toBeVisible();
+    for (const locator of [
+      page.getByRole("textbox").first(),
+      suggestions,
+      ...(await suggestions.getByRole("button").all()),
+    ]) {
+      await expect(locator).toBeVisible();
+      const box = await locator.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(-1);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(391);
+    }
   });
 });

@@ -31,6 +31,7 @@ export interface Translations {
       | "reportSections"
       | "agentTeams"
       | "bookmarks"
+      | "cvciEntities"
       | "context"
       | "classify"
       | "screening"
@@ -220,6 +221,24 @@ export interface Translations {
     searchNoResults: string;
     searchLoadFailed: string;
     searchLoading: string;
+  };
+
+  workspaceBrand: {
+    name: string;
+    title: string;
+    subtitle: string;
+    workspace: string;
+    headline: string;
+    description: string;
+    startQuestion: string;
+    searchChats: string;
+    poweredBy: string;
+    starters: {
+      title: string;
+      description: string;
+      hint: string;
+      prompt: string;
+    }[];
   };
 
   // Welcome
@@ -2030,6 +2049,7 @@ export interface Translations {
     account: {
       profileTitle: string;
       email: string;
+      cvciManaged: string;
       role: string;
       changePasswordTitle: string;
       changePasswordDescription: string;
@@ -2080,6 +2100,14 @@ export interface Translations {
     serviceUnavailableDescription: string;
     retry: string;
     authFailed: string;
+    sharedLogout: {
+      pending: string;
+      failed: string;
+      changed: string;
+      cleanupFailed: string;
+      retry: string;
+      reload: string;
+    };
     cvciFailure: { title: string; description: string; retry: string };
     errors: {
       sso_failed: string;

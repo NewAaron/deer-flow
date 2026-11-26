@@ -4,7 +4,11 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { useAuth } from "@/core/auth/AuthProvider";
-import type { PluginSurface, SurfaceSlot } from "@/core/extensions/contracts";
+import type {
+  ComposerPickerSelection,
+  PluginSurface,
+  SurfaceSlot,
+} from "@/core/extensions/contracts";
 import {
   useFrontendExtensions,
   useFrontendServices,
@@ -20,14 +24,16 @@ import {
 import { mountSurface } from "@/core/extensions/surfaces";
 import { useI18n } from "@/core/i18n/hooks";
 
-function Surface({
+export function PluginSurfaceView({
   entry,
   surface,
   threadId,
+  confirmSelection,
 }: {
   entry: LoadedContribution;
   surface: PluginSurface;
   threadId?: string;
+  confirmSelection?: (selection: ComposerPickerSelection) => Promise<void>;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -36,6 +42,9 @@ function Surface({
   const services = useFrontendServices();
   const currentServices = useRef(services);
   currentServices.current = services;
+  const currentConfirm = useRef(confirmSelection);
+  currentConfirm.current = confirmSelection;
+  const hasConfirm = !!confirmSelection;
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     if (!ref.current) return;
@@ -48,6 +57,9 @@ function Surface({
         locale,
         settings: entry.settings,
         threadId,
+        confirmSelection: hasConfirm
+          ? (selection) => currentConfirm.current!(selection)
+          : undefined,
         openConversation: (id, signal) =>
           openConversation(id, (path) => router.push(path), signal),
         callBackend: bindFrontendServices(
@@ -62,7 +74,7 @@ function Surface({
       abort.abort();
       cleanup();
     };
-  }, [entry, surface, locale, threadId, user?.id, router]);
+  }, [entry, surface, locale, threadId, user?.id, router, hasConfirm]);
   return (
     <section aria-label={surface.title}>
       {failed && <p role="alert">{t.extensions.viewFailed}</p>}
@@ -95,7 +107,7 @@ export function PluginSurfaces({
             surface.slot === slot && (!surfaceId || surface.id === surfaceId),
         )
         .map((surface) => (
-          <Surface
+          <PluginSurfaceView
             key={`${user?.id}:${threadId}:${entry.namespace}:${surface.id}`}
             entry={entry}
             surface={surface}

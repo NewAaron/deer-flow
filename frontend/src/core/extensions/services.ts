@@ -38,8 +38,34 @@ export function bindFrontendServices(
           ...(signal ? { signal } : {}),
         },
       );
-      if (!response.ok)
-        throw new Error(`Plugin action unavailable (${response.status})`);
+      if (!response.ok) {
+        const failure = Object.assign(
+          new Error(`Plugin action unavailable (${response.status})`),
+          { status: response.status },
+        );
+        try {
+          const body: unknown = await response.json();
+          const detail =
+            body && typeof body === "object" && "detail" in body
+              ? body.detail
+              : undefined;
+          if (
+            detail &&
+            typeof detail === "object" &&
+            Object.hasOwn(detail, "code")
+          ) {
+            const code = (detail as Record<string, unknown>).code;
+            if (
+              typeof code === "string" &&
+              /^[a-z][a-z0-9_.-]{0,127}$/.test(code)
+            )
+              Object.assign(failure, { code });
+          }
+        } catch {
+          // Proxy/non-JSON failures keep the existing generic HTTP error.
+        }
+        throw failure;
+      }
       return response.json() as Promise<unknown>;
     },
   };

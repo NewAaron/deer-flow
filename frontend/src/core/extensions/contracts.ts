@@ -6,7 +6,11 @@ import type { AgentThread } from "@/core/threads/types";
 export type ExtensionSettings = Readonly<
   Record<string, boolean | number | string>
 >;
-export type SurfaceSlot = "page";
+export type SurfaceSlot = "page" | "composer-picker";
+export type ComposerPickerSelection = {
+  reference: ExtensionMention;
+  text: string;
+};
 export type SurfaceContext = {
   namespace: string;
   locale: string;
@@ -16,6 +20,8 @@ export type SurfaceContext = {
   callBackend: FrontendServices["callBackend"];
   /** Host resolves current thread ownership before navigating; unavailable on older hosts. */
   openConversation?: (threadId: string) => Promise<void>;
+  /** Available only in a host-owned picker for the current composer. */
+  confirmSelection?: (selection: ComposerPickerSelection) => Promise<void>;
 };
 export type PluginSurface = {
   id: string;

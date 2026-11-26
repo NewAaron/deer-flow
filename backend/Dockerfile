@@ -121,6 +121,10 @@ WORKDIR /app
 # Copy backend with pre-built virtualenv from builder
 COPY --from=builder /app/backend ./backend
 
+# Preserve standard MIME classification used by artifact download protection.
+# The slim runtime otherwise lacks the database installed in the builder.
+COPY --from=builder /etc/mime.types /etc/mime.types
+
 # Expose Gateway API port.
 EXPOSE 8001
 

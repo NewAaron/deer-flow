@@ -17,6 +17,14 @@ The app has three surfaces that share one token set:
 
 ## Color
 
+Local deployment exception: `/workspace/*` in this checkout uses the CVCI blue
+palette and the supplied Mingshi brand artwork, with a quiet image background on
+the new-chat home screen. `styles/workspace-brand.css` scopes its tokens through
+the workspace marker, including body portals, and provides a navy dark variant.
+The home hero/cards use normal document flow so small or short viewports can
+scroll. Other surfaces retain the baseline design below. This is a presentation
+customization; native conversation behavior and generated UI primitives stay intact.
+
 Colors are shadcn-style semantic tokens in OKLCH, defined on `:root` and `.dark`
 in `globals.css` and exposed to Tailwind through `@theme inline`
 (`bg-background`, `text-muted-foreground`, `border-border`, ...).

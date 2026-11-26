@@ -11,7 +11,7 @@ from ipaddress import ip_address, ip_network
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from starlette.responses import RedirectResponse
 
 from app.gateway.auth import (
@@ -19,9 +19,12 @@ from app.gateway.auth import (
     create_access_token,
     login_throttle,
 )
+from app.gateway.auth.browser_session import browser_auth_policy, browser_login_fence, browser_session_fence, clear_browser_session, read_browser_token, read_session_id, set_browser_session
 from app.gateway.auth.config import get_auth_config
-from app.gateway.auth.cvci import CVCI_PROVIDER, CVCI_SESSION_DURATION, CvciAuthorizationError, CvciGrant, get_cvci_authorization, read_session_reference
-from app.gateway.auth.errors import AuthErrorCode, AuthErrorResponse
+from app.gateway.auth.cvci import CVCI_PROVIDER, CVCI_SESSION_DURATION, CvciAuthorizationError, CvciGrant, CvciSessionInvalid, get_cvci_authorization, read_session_reference
+from app.gateway.auth.cvci_provisioning import get_or_provision_cvci_user
+from app.gateway.auth.errors import AuthErrorCode, AuthErrorResponse, TokenError
+from app.gateway.auth.jwt import decode_token
 from app.gateway.auth.oidc import OIDCError, OIDCService
 from app.gateway.auth.oidc_state import (
     OIDCStatePayload,
@@ -57,6 +60,16 @@ class LoginResponse(BaseModel):
 
     expires_in: int  # seconds
     needs_setup: bool = False
+
+
+class LogoutRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_session: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+async def _require_local_auth(request: Request) -> None:
+    if not (await browser_auth_policy(request)).local_login_enabled:
+        raise HTTPException(403, detail={"code": "local_auth_disabled", "message": "Use the configured identity provider to sign in."})
 
 
 # Top common-password blocklist. Drawn from the public SecLists "10k worst
@@ -438,6 +451,7 @@ async def login_local(
     remember_me: bool = Form(default=True),
 ):
     """Local email/password login."""
+    await _require_local_auth(request)
     client_ip = await _get_client_ip(request)
     await _check_rate_limit(client_ip)
 
@@ -482,7 +496,8 @@ def _local_registration_enabled() -> bool:
     from deerflow.config.app_config import get_app_config
 
     try:
-        return get_app_config().auth.local.allow_registration
+        local = get_app_config().auth.local
+        return getattr(local, "enabled", True) and local.allow_registration
     except FileNotFoundError:
         return True
 
@@ -496,6 +511,7 @@ async def register(request: Request, response: Response, body: RegisterRequest):
 
     Returns 403 when ``auth.local.allow_registration`` is false.
     """
+    await _require_local_auth(request)
     if not await asyncio.to_thread(_local_registration_enabled):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -517,8 +533,32 @@ async def register(request: Request, response: Response, body: RegisterRequest):
 
 
 @router.post("/logout", response_model=MessageResponse)
-async def logout(request: Request, response: Response):
+async def logout(request: Request, response: Response, body: LogoutRequest | None = None):
     """Logout current user by clearing the cookie."""
+    policy = await browser_auth_policy(request)
+    if policy.required_oidc_provider is not None:
+        token = read_browser_token(request.cookies, strict=True)
+        session = decode_token(token) if token else None
+        if session is None or isinstance(session, TokenError) or not session.sid or read_session_id(request.cookies) != session.sid:
+            raise HTTPException(401, detail={"code": "token_invalid", "message": "The original sign-out session is no longer available."})
+        if body is None or not body.expected_session or not constant_time_equals(body.expected_session, browser_session_fence(session.sub, session.sid)):
+            raise HTTPException(409, detail={"code": "session_changed", "message": "The browser session changed. Sign out from the current account."})
+        user = await get_local_provider().get_user(session.sub)
+        from app.gateway.deps import validate_resolved_session_user
+
+        if user is None or user.oauth_provider != policy.required_oidc_provider or validate_resolved_session_user(user, session):
+            raise HTTPException(401, detail={"code": "token_invalid", "message": "The original sign-out session is no longer available."})
+        cvci = get_cvci_authorization(request)
+        if cvci is None:
+            raise HTTPException(503, detail={"code": "logout_unconfirmed", "message": "Global sign-out could not be confirmed. Retry sign-out."})
+        try:
+            await cvci.logout_all(session.sid, session.sub)
+        except CvciSessionInvalid:
+            raise HTTPException(401, detail={"code": "token_invalid", "message": "The original sign-out session is no longer available."}) from None
+        except CvciAuthorizationError:
+            raise HTTPException(503, detail={"code": "logout_unconfirmed", "message": "Global sign-out could not be confirmed. Retry sign-out."}) from None
+        clear_browser_session(response, request, session.sid)
+        return MessageResponse(message="Successfully logged out")
     cvci = get_cvci_authorization(request)
     if cvci is not None:
         session = read_session_reference(request)
@@ -535,6 +575,30 @@ async def logout(request: Request, response: Response):
     return MessageResponse(message="Successfully logged out")
 
 
+@router.post("/logout/cleanup")
+async def cleanup_logout(request: Request, response: Response, body: LogoutRequest | None = None):
+    """Clear an invalid original browser credential without ever revoking a user."""
+    setattr(request.state, SKIP_AUTH_CSRF_COOKIE_STATE_ATTR, True)
+    policy = await browser_auth_policy(request)
+    sid = read_session_id(request.cookies)
+    token = read_browser_token(request.cookies, strict=policy.required_oidc_provider is not None)
+    if token is None:
+        return {"status": "cleared"}
+    payload = decode_token(token)
+    if body and body.expected_session:
+        if isinstance(payload, TokenError) or not payload.sid or not constant_time_equals(body.expected_session, browser_session_fence(payload.sub, payload.sid)):
+            return {"status": "unchanged"}
+    try:
+        await get_current_user_from_request(request)
+    except HTTPException as exc:
+        if exc.status_code != 401:
+            raise
+        if sid is not None:
+            clear_browser_session(response, request, sid)
+        return {"status": "cleared"}
+    return {"status": "unchanged"}
+
+
 @router.post("/change-password", response_model=MessageResponse)
 async def change_password(request: Request, response: Response, body: ChangePasswordRequest):
     """Change password for the currently authenticated user.
@@ -545,6 +609,7 @@ async def change_password(request: Request, response: Response, body: ChangePass
     - Always increments token_version to invalidate old sessions
     - Re-issues session cookie with new token_version
     """
+    await _require_local_auth(request)
     from app.gateway.auth.password import hash_password_async, verify_password_async
     from app.gateway.auth_disabled import AUTH_SOURCE_AUTH_DISABLED, AUTH_SOURCE_PAT
 
@@ -614,6 +679,12 @@ async def get_me(request: Request):
         from app.gateway.authz import resolve_route_permissions_for_request
 
         permissions = await resolve_route_permissions_for_request(request, user)
+    from app.gateway.auth_disabled import AUTH_SOURCE_SESSION
+
+    session = read_session_reference(request)
+    fence = None
+    if session is not None and session.sid and session.sub == str(user.id) and read_session_id(request.cookies) == session.sid and getattr(request.state, "auth_source", AUTH_SOURCE_SESSION) == AUTH_SOURCE_SESSION:
+        fence = browser_session_fence(str(user.id), session.sid)
     return UserResponse(
         id=str(user.id),
         email=user.email,
@@ -621,6 +692,7 @@ async def get_me(request: Request):
         needs_setup=user.needs_setup,
         oauth_provider=user.oauth_provider,
         permissions=permissions,
+        session_fence=fence,
     )
 
 
@@ -762,6 +834,8 @@ _SETUP_STATUS_INFLIGHT_GUARD = asyncio.Lock()
 @router.get("/setup-status")
 async def setup_status(request: Request):
     """Check if an admin account exists. Returns needs_setup=True when no admin exists."""
+    if not (await browser_auth_policy(request)).local_login_enabled:
+        return {"needs_setup": False, "allow_registration": False, "local_login_enabled": False}
     client_ip = await _get_client_ip(request)
     now = time.time()
 
@@ -839,6 +913,7 @@ async def initialize_admin(request: Request, response: Response, body: Initializ
     On success, the admin account is created with ``needs_setup=False`` and
     the session cookie is set.
     """
+    await _require_local_auth(request)
     already_initialized = HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail=AuthErrorResponse(code=AuthErrorCode.SYSTEM_ALREADY_INITIALIZED, message="System already initialized").model_dump(),
@@ -938,19 +1013,23 @@ def _resolve_oidc_redirect_uri(request: Request, provider_id: str, provider_conf
 
 
 @router.get("/providers")
-async def list_auth_providers():
+async def list_auth_providers(request: Request):
     """List enabled SSO providers for the login page.
 
     Returns only safe frontend metadata — no secrets, endpoints, or
     internal configuration.
     """
     oidc_config = await _oidc_config()
+    policy = await browser_auth_policy(request)
+    metadata = {} if policy.local_login_enabled and policy.required_oidc_provider is None else {"local_login_enabled": policy.local_login_enabled, "required_oidc_provider": policy.required_oidc_provider}
 
     if not oidc_config.enabled:
-        return {"providers": []}
+        return {"providers": [], **metadata}
 
     providers = []
     for provider_id, provider_cfg in oidc_config.providers.items():
+        if policy.required_oidc_provider is not None and provider_id != policy.required_oidc_provider:
+            continue
         if provider_id == CVCI_PROVIDER and not cvci_oidc_enabled():
             continue
         providers.append(
@@ -960,7 +1039,7 @@ async def list_auth_providers():
                 "type": "oidc",
             }
         )
-    return {"providers": providers}
+    return {"providers": providers, **metadata}
 
 
 @router.get("/oauth/{provider}")
@@ -978,6 +1057,9 @@ async def oauth_login(
     redirect after successful login (default: /workspace).
     """
     oidc_config = await _oidc_config()
+    policy = await browser_auth_policy(request)
+    if policy.required_oidc_provider is not None and provider != policy.required_oidc_provider:
+        raise HTTPException(403, detail="Use the configured identity provider to sign in.")
 
     if not oidc_config.enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SSO authentication is not enabled")
@@ -995,7 +1077,8 @@ async def oauth_login(
         if not (provider_config.pkce_enabled and provider_config.nonce_enabled and provider_config.client_secret):
             return _cvci_login_failed(oidc_config)
         remember_me = False
-        authorization_endpoint = _cvci_browser_authorization_endpoint(provider_config, cvci_browser_host)
+        if policy.required_oidc_provider is None:
+            authorization_endpoint = _cvci_browser_authorization_endpoint(provider_config, cvci_browser_host)
 
     # Validate `next` / open redirect prevention
     redirect_path = validate_next_param(next) or "/workspace"
@@ -1045,6 +1128,7 @@ async def oauth_login(
         code_verifier=code_verifier,
         next_path=redirect_path,
         remember_me=remember_me,
+        browser_session_fence=browser_login_fence(request.cookies) if policy.required_oidc_provider is not None else None,
     )
     redirect_response = RedirectResponse(url=auth_url, status_code=status.HTTP_302_FOUND)
     set_state_cookie(redirect_response, request, state_payload)
@@ -1089,6 +1173,9 @@ async def oauth_callback(
     session cookie.
     """
     oidc_config = await _oidc_config()
+    policy = await browser_auth_policy(request)
+    if policy.required_oidc_provider is not None and provider != policy.required_oidc_provider:
+        raise HTTPException(403, detail="Use the configured identity provider to sign in.")
     is_cvci = provider == CVCI_PROVIDER
     cvci = get_cvci_authorization(request) if is_cvci else None
     if is_cvci and (error or cvci is None):
@@ -1126,6 +1213,10 @@ async def oauth_callback(
         if is_cvci:
             return _cvci_login_failed(oidc_config)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="OIDC state mismatch")
+    if policy.required_oidc_provider is not None and (not state_payload.browser_session_fence or not constant_time_equals(state_payload.browser_session_fence, browser_login_fence(request.cookies))):
+        # A later tab may have selected a different account after this flow
+        # started. Never use that later cookie as the old account to revoke.
+        return _cvci_login_failed(oidc_config, request)
     if is_cvci and not (state_payload.code_verifier and state_payload.nonce and provider_config.pkce_enabled and provider_config.nonce_enabled and provider_config.client_secret):
         return _cvci_login_failed(oidc_config, request)
 
@@ -1174,7 +1265,10 @@ async def oauth_callback(
     # ── Provision / link user ────────────────────────────────────────
     try:
         grant = CvciGrant.from_identity(identity, provider_config.client_id, "") if cvci is not None else None
-        result = await get_or_provision_oidc_user(provider, provider_config, identity, get_local_provider())
+        if grant is not None:
+            result = await get_or_provision_cvci_user(grant, provider_config, get_local_provider())
+        else:
+            result = await get_or_provision_oidc_user(provider, provider_config, identity, get_local_provider())
     except CvciAuthorizationError:
         return _cvci_login_failed(oidc_config, request)
     except HTTPException as exc:
@@ -1196,12 +1290,17 @@ async def oauth_callback(
         try:
             previous = read_session_reference(request)
             if previous is not None and previous.sid is not None:
-                await cvci.logout(previous.sid, previous.sub)
+                if policy.required_oidc_provider is not None and read_session_id(request.cookies) == previous.sid and previous.sub != str(user.id):
+                    await cvci.logout_all(previous.sid, previous.sub)
+                else:
+                    await cvci.logout(previous.sid, previous.sub)
             session_id = await cvci.bind(grant.model_copy(update={"deerFlowUserId": str(user.id)}))
+            if policy.required_oidc_provider is not None:
+                await cvci.check(session_id, str(user.id))
         except CvciAuthorizationError:
             logger.warning("Could not establish a CVCI-enabled DeerFlow session")
             return _cvci_login_failed(oidc_config, request)
-        token = create_access_token(str(user.id), CVCI_SESSION_DURATION, user.token_version, session_id=session_id)
+        token = create_access_token(str(user.id), CVCI_SESSION_DURATION, user.token_version, session_id=session_id, browser_session=policy.required_oidc_provider is not None)
     else:
         token = create_access_token(str(user.id), token_version=user.token_version)
 
@@ -1215,7 +1314,12 @@ async def oauth_callback(
         redirect_response.headers.update(_CVCI_CALLBACK_HEADERS)
 
     # Set session cookie (reuse existing helper)
-    _set_session_cookie(redirect_response, token, request, remember_me=False if is_cvci else state_payload.remember_me)
+    if is_cvci and policy.required_oidc_provider is not None:
+        set_browser_session(redirect_response, request, token, session_id)
+        if previous is not None and previous.sid is not None and read_session_id(request.cookies) == previous.sid:
+            clear_browser_session(redirect_response, request, previous.sid)
+    else:
+        _set_session_cookie(redirect_response, token, request, remember_me=False if is_cvci else state_payload.remember_me)
 
     # Set CSRF cookie (callback is a GET, so CSRF middleware won't set it)
     _set_csrf_cookie(redirect_response, request)

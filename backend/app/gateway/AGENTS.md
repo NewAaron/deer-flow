@@ -64,23 +64,9 @@ and `CSRFMiddleware`. Expose `Content-Location` through `CORS_EXPOSED_HEADERS`
 SDK uses only that header for run metadata. Without exposure, JS cannot read it,
 breaking `useStream.onCreated` and thread-gated actions.
 
-Browser sessions belong to `app.gateway.auth.session_cookie`. Login's `remember_me`
-flag never stores passwords. `SessionCookiePolicy` persists `HttpOnly access_token`
-only for HTTPS/trusted-forwarded HTTPS, direct-host localhost HTTP, or explicit
-operator opt-in; public HTTP otherwise uses session cookies. Session creators set
-final `max_age` on `request.state`; CSRF mirrors it across login, password changes
-and OIDC callbacks. A small `HttpOnly` preference cookie preserves the choice.
-Logout clears auth cookies and suppresses CSRF re-issue.
-
-OIDC redirects retain existing endpoint query bytes (RFC 6749 section 3.1).
-Malformed IdP bodies raise `OIDCError` (502/`sso_failed`).
-`tests/test_oidc_auth.py` pins query, state-cookie, nonce and PKCE agreement.
-The optional CVCI provider can select a browser hostname on its configured
-loopback HTTP authorization port. Discovery and token exchange use their own
-configured endpoints and verify the same issuer. The Gateway requests CVCI tool
-tickets for the current DeerFlow session and its linked CVCI tenant and user.
-
-Personal Access Tokens (`app.gateway.auth.pat`, `Authorization: Bearer dfp_...`) run as their owning user: an invalid Bearer is a hard 401 with no cookie fallback, which keeps `CSRFMiddleware`'s Bearer skip safe (origin checks still run). Scopes narrow within the allowlisted threads/runs/projects routes (including `POST /api/threads/{id}/move`); every other authenticated route 403s PAT callers (admin included). PAT management and `/change-password` require session auth; only SHA-256 digests are stored (`0017`).
+Browser cookies, strict CVCI grants, OIDC state and PAT boundaries:
+[authentication contracts](auth/AGENTS.md). Never fall back from a rejected
+credential to another identity; keep browser, internal and PAT sources distinct.
 
 Thread→project membership is written by thread creation (`POST /api/threads` with
 a validated `project_id`), branch creation (the new row inherits the source

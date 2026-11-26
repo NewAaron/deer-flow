@@ -1,5 +1,15 @@
 # Router contracts
 
+CVCI callbacks validate `CvciGrant.from_identity` before calling
+`auth/cvci_provisioning.py`. Resolve only the cvci/provider-sub binding; preserve
+existing UUID/email/role and reject disabled/setup rows. New rows use a stable
+internal email-shaped ID and role `user`, never contact-email/admin-email claims.
+Keep generic OIDC provisioning unchanged; bind the CVCI session after resolution.
+
+Auth routes obey [the shared authentication contracts](../auth/AGENTS.md),
+including local-auth gates, initiating-browser OAuth fences, confirmed global
+logout and cleanup that never revokes a later account.
+
 `GET /api/plugins/diagnostics` uses `require_admin_user` before reading the
 canonical runtime diagnostic snapshot. Return bounded entry-point identifiers,
 known levels and fixed summaries; raw messages stay in logs. Never clear the
@@ -80,6 +90,14 @@ external filesystem writers do not participate in this history guarantee.
 Plugin actions stamp `ActionContext.interaction=session` only from authenticated
 session provenance. Never accept it from payloads or propagate it to model tools;
 extensions use it to distinguish owner review from model/tool output.
+Explicit `mcp_read_access_denied` capability errors map to fixed safe HTTP403
+guidance; remote messages and unknown capability details never cross the route.
+Declared `BackendAction.mcp_reads` receive an action-lifetime `mcp_reader` only
+for authenticated browser sessions. `session_mcp_reader.py` pins the CVCI HTTP
+deployment, reuses this Request's sid/owner ticket provider, checks exact tool
+declarations plus non-destructive read-only discovery, and retires pending reads
+when the action ends. Never find a historical grant by user ID or return tickets,
+headers, raw transport failures or MCP configuration through plugin actions.
 
 Skill archive upload copies (`_copy_uploaded_skill_archive`) report the original
 size-limit or read error when temporary cleanup or its warning log fails.

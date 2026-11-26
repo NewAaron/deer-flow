@@ -62,9 +62,10 @@ from deerflow_extension_api.placement import (
     AgentBuildContext,
     AgentScope,
     MiddlewarePlacement,
+    ModelInputRejected,
     Placement,
 )
-from deerflow_extension_api.plugins import ActionContext, BackendAction, BrowserAssets, BrowserModule, ModelTool, PluginContribution, PluginToolResult, ToolContext
+from deerflow_extension_api.plugins import ActionContext, BackendAction, BrowserAssets, BrowserModule, McpReadTool, ModelTool, PluginContribution, PluginToolResult, SessionMcpReader, ToolContext
 from deerflow_extension_api.provenance import (
     MESSAGE_CONTENT_KIND_KEY,
     MESSAGE_PRODUCER_ENTITY_ID_KEY,
@@ -102,7 +103,7 @@ from deerflow_extension_api.state import ExtensionData
 
 #: Contract version. Before 1.0, minors may break and patches are additive.
 #: From 1.0 on, bump the major for breaking changes.
-API_VERSION = "0.2.9"
+API_VERSION = "0.2.10"
 
 __all__ = [
     "AGENT_RUNS_CONTEXT_KEY",
@@ -125,6 +126,9 @@ __all__ = [
     "ModelUsage",
     "ActionContext",
     "BackendAction",
+    "McpReadTool",
+    "SessionMcpReader",
+    "ModelInputRejected",
     "BrowserAssets",
     "BrowserModule",
     "ModelTool",

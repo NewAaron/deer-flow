@@ -15,8 +15,6 @@ import {
 import { useI18n } from "@/core/i18n/hooks";
 import { cn } from "@/lib/utils";
 
-import { GithubIcon } from "./github-icon";
-import { Tooltip } from "./tooltip";
 import { WorkspaceSidebarTrigger } from "./workspace-sidebar-trigger";
 // Workspace sections that have an index route (/workspace/<section>/page.tsx)
 // and can therefore be linked to from the breadcrumb.
@@ -32,7 +30,10 @@ export function WorkspaceContainer({
   ...props
 }: React.ComponentProps<"div">) {
   return (
-    <div className={cn("flex h-screen w-full flex-col", className)} {...props}>
+    <div
+      className={cn("flex h-full min-h-0 w-full flex-col", className)}
+      {...props}
+    >
       {children}
     </div>
   );
@@ -98,18 +99,6 @@ export function WorkspaceHeader({
             )}
           </BreadcrumbList>
         </Breadcrumb>
-      </div>
-      <div className="pr-4">
-        <Tooltip content={t.workspace.githubTooltip}>
-          <a
-            href="https://github.com/bytedance/deer-flow"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="opacity-75 transition hover:opacity-100"
-          >
-            <GithubIcon className="size-6" />
-          </a>
-        </Tooltip>
       </div>
     </header>
   );

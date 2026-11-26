@@ -160,6 +160,11 @@ DOM regression: `new-agent-save.dom.test.tsx`.
 - **Components**: `ui/` and `ai-elements/` are generated from registries (Shadcn, MagicUI, React Bits, Vercel AI SDK) — don't manually edit these.
 
 Sidebar customization: `components/workspace/workspace-sidebar-frame.tsx`.
+CVCI branding/pickers: [ownership rules](docs/cvci-workspace.md). Keep workspace
+scope, native drafts/chat behavior, cancellation fences and packaged business rules.
+CVCI account profile ownership also follows that guide.
+The local MSAI display brand also covers auth/public navigation, browser metadata
+and notifications; retain technical documentation bodies and internal identifiers.
 Rail/drawer mount one tree; `useWorkspaceSidebarExpanded` preserves desktop
 `SidebarProvider.open`. Keep polling/delete-dialog provider outside that tree.
 Reuse stock `Sidebar`; close before link navigation and on pathname changes,
@@ -430,8 +435,8 @@ locked during attachment. Deleting an object removes its context; undo restores
 references already attached to the draft. Labels grant no read authority. IME,
 caret, thread changes and attachment fences apply to editor and picker. Commit
 mention text before restoring focus synchronously; a delayed callback must not
-overwrite subsequent typing or caret movement. The `@`
-and attachment buttons share the picker.
+overwrite subsequent typing or caret movement. The `@` button opens the
+reference picker. The attachment button opens the browser's native file chooser.
 
 ### Web model provider presets
 

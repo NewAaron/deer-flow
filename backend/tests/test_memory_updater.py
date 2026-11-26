@@ -262,7 +262,18 @@ def test_parse_memory_update_response_normalizes_reinforcement_entries() -> None
     ]
 
 
-def test_automatic_update_uses_hybrid_capacity_policy() -> None:
+def test_automatic_update_uses_hybrid_capacity_policy(monkeypatch) -> None:
+    from datetime import UTC, datetime
+    from functools import partial
+
+    from deerflow.agents.memory.backends.deermem.deermem.core import updater as updater_module
+
+    # "Recently confirmed" is relative to this fixture's snapshot, not the test date.
+    monkeypatch.setattr(
+        updater_module,
+        "select_facts_for_capacity",
+        partial(updater_module.select_facts_for_capacity, now=datetime(2026, 8, 12, tzinfo=UTC)),
+    )
     updater = _make_updater(
         config=_memory_config(
             fact_eviction_policy="hybrid-v1",

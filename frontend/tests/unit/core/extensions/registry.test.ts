@@ -19,6 +19,27 @@ const entry = {
 const extension = { apiVersion: 1, module: entry.module };
 const code = "export default {apiVersion: 1, module: 'bookmarks.v1'};";
 
+test("composer picker surfaces load without becoming navigable pages", async () => {
+  rs.spyOn(globalThis, "fetch").mockResolvedValue(new Response(code));
+  const picker = {
+    id: "record",
+    slot: "composer-picker",
+    title: "Records",
+    mount: rs.fn(),
+  };
+  const result = await loadFrontendExtensions([entry], async () => ({
+    default: { ...extension, surfaces: [picker] },
+  }));
+  expect(result[0]?.extension?.surfaces).toEqual([picker]);
+  const invalid = await loadFrontendExtensions([entry], async () => ({
+    default: {
+      ...extension,
+      surfaces: [{ ...picker, navigation: { label: "Records" } }],
+    },
+  }));
+  expect(invalid[0]?.extension).toBeUndefined();
+});
+
 beforeEach(() => {
   config.backend = "";
   rs.spyOn(console, "warn").mockImplementation(() => undefined);

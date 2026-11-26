@@ -123,11 +123,13 @@ async def _authenticate_ws(websocket: WebSocket):
     ``None`` when unauthenticated.
     """
     from app.gateway.auth import decode_token
+    from app.gateway.auth.browser_session import browser_auth_policy, read_browser_token, validate_browser_authorization
     from app.gateway.auth.errors import TokenError
     from app.gateway.auth_disabled import get_auth_disabled_user, is_auth_disabled
     from app.gateway.deps import get_local_provider
 
-    access_token = websocket.cookies.get("access_token")
+    policy = await browser_auth_policy(websocket)
+    access_token = read_browser_token(websocket.cookies, strict=policy.required_oidc_provider is not None)
     if access_token:
         payload = decode_token(access_token)
         if not isinstance(payload, TokenError):
@@ -141,8 +143,12 @@ async def _authenticate_ws(websocket: WebSocket):
                 from app.gateway.deps import validate_resolved_session_user
 
                 if validate_resolved_session_user(user, payload) is None:
+                    try:
+                        await validate_browser_authorization(websocket, user, payload)
+                    except HTTPException:
+                        return None
                     return user
-    if is_auth_disabled():
+    if is_auth_disabled() and policy.required_oidc_provider is None:
         return get_auth_disabled_user()
     return None
 
@@ -224,6 +230,14 @@ async def browser_stream(websocket: WebSocket, thread_id: ThreadId) -> None:
     if user is None:
         await websocket.close(code=4401)
         return
+
+    from app.gateway.auth.browser_session import browser_auth_policy
+
+    strict_session = (await browser_auth_policy(websocket)).required_oidc_provider is not None
+
+    async def current_session_is_live() -> bool:
+        current = await _authenticate_ws(websocket)
+        return current is not None and str(current.id) == str(user.id)
 
     if not _ws_origin_allowed(websocket):
         # Cross-origin upgrade — reject before touching any session (WS-CSRF).
@@ -462,6 +476,9 @@ async def browser_stream(websocket: WebSocket, thread_id: ThreadId) -> None:
                     if _has_pending_input():
                         input_event.set()
                     break
+                if strict_session and not await current_session_is_live():
+                    await websocket.close(code=4401)
+                    return
                 if event.get("type") == "navigate":
                     # SSRF-screen client-driven navigations with the same policy
                     # the agent tools enforce; reject rather than dispatch.
@@ -484,6 +501,15 @@ async def browser_stream(websocket: WebSocket, thread_id: ThreadId) -> None:
     input_task: asyncio.Task | None = None
     reader_task: asyncio.Task | None = None
     poll_task: asyncio.Task | None = None
+    auth_task: asyncio.Task | None = None
+
+    async def watch_authority() -> None:
+        while True:
+            await asyncio.sleep(2)
+            if not await current_session_is_live():
+                await websocket.close(code=4401)
+                return
+
     cancellation: asyncio.CancelledError | None = None
     try:
         # Seed the live page from the latest browser_view URL. A thread can have
@@ -506,7 +532,11 @@ async def browser_stream(websocket: WebSocket, thread_id: ThreadId) -> None:
         input_task = asyncio.create_task(_process_inputs())
         reader_task = asyncio.create_task(_read_inputs())
         poll_task = asyncio.create_task(_poll_location())
-        await reader_task
+        if strict_session:
+            auth_task = asyncio.create_task(watch_authority())
+            await asyncio.wait({reader_task, auth_task}, return_when=asyncio.FIRST_COMPLETED)
+        else:
+            await reader_task
     except WebSocketDisconnect:
         pass
     except asyncio.CancelledError as exc:
@@ -521,6 +551,8 @@ async def browser_stream(websocket: WebSocket, thread_id: ThreadId) -> None:
             reader_task.cancel()
         if poll_task is not None:
             poll_task.cancel()
+        if auth_task is not None:
+            auth_task.cancel()
         try:
             await await_drained(session.stop_screencast(_on_frame))
         except asyncio.CancelledError as exc:

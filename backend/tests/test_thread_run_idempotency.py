@@ -38,7 +38,8 @@ def _run(run_id: str, thread_id: str) -> RunRecord:
 
 
 def _make_client(monkeypatch, user: User, admissions: dict[str, RunRecord]) -> TestClient:
-    async def fake_start_run(body, thread_id, request, *, idempotency_key=None, require_existing_thread=False):
+    async def fake_start_run(body, thread_id, request, *, idempotency_key=None, require_existing_thread=False, cvci_interactive: bool = False):
+        assert cvci_interactive is request.url.path.endswith(("/stream", "/wait"))
         del body, request, require_existing_thread
         if idempotency_key is not None and idempotency_key in admissions:
             record = admissions[idempotency_key]
@@ -198,7 +199,8 @@ class _StaleSnapshot:
 def test_wait_reused_store_only_run_does_not_return_stale_checkpoint(monkeypatch):
     """A reused running record has no local task; /wait must not serialize the current checkpoint."""
 
-    async def fake_start_run(body, thread_id, request, *, idempotency_key=None, require_existing_thread=False):
+    async def fake_start_run(body, thread_id, request, *, idempotency_key=None, require_existing_thread=False, cvci_interactive: bool = False):
+        assert cvci_interactive is True
         del body, request, idempotency_key, require_existing_thread
         return RunRecord(
             run_id="run-live",
@@ -242,7 +244,8 @@ def test_wait_reused_store_only_run_does_not_return_stale_checkpoint(monkeypatch
 def test_wait_reused_completed_run_does_not_return_later_checkpoint(monkeypatch):
     """A locally cached completed reuse must not serialize a later thread head."""
 
-    async def fake_start_run(body, thread_id, request, *, idempotency_key=None, require_existing_thread=False):
+    async def fake_start_run(body, thread_id, request, *, idempotency_key=None, require_existing_thread=False, cvci_interactive: bool = False):
+        assert cvci_interactive is True
         del body, request, idempotency_key, require_existing_thread
         return RunRecord(
             run_id="run-a",
@@ -308,7 +311,8 @@ async def test_wait_original_request_keeps_checkpoint_when_retry_overlaps():
     )
     request = SimpleNamespace(headers={}, is_disconnected=AsyncMock(return_value=False))
 
-    async def fake_start_run(body, thread_id, request, *, idempotency_key=None, require_existing_thread=False):
+    async def fake_start_run(body, thread_id, request, *, idempotency_key=None, require_existing_thread=False, cvci_interactive: bool = False):
+        assert cvci_interactive is True
         del body, thread_id, request, idempotency_key, require_existing_thread
         return record
 
@@ -378,7 +382,8 @@ async def test_wait_peer_refreshes_status_after_owner_completes():
     assert reused.status == RunStatus.running
     request = SimpleNamespace(headers={}, is_disconnected=AsyncMock(return_value=False))
 
-    async def fake_start_run(body, thread_id, request, *, idempotency_key=None, require_existing_thread=False):
+    async def fake_start_run(body, thread_id, request, *, idempotency_key=None, require_existing_thread=False, cvci_interactive: bool = False):
+        assert cvci_interactive is True
         del body, thread_id, request, idempotency_key, require_existing_thread
         return reused
 
@@ -438,7 +443,8 @@ def test_internal_caller_key_is_scoped_by_owner_not_thread():
 def test_stream_reused_store_only_running_run_returns_409(monkeypatch):
     """A reused running record on a process-local bridge must not hang on an empty stream."""
 
-    async def fake_start_run(body, thread_id, request, *, idempotency_key=None, require_existing_thread=False):
+    async def fake_start_run(body, thread_id, request, *, idempotency_key=None, require_existing_thread=False, cvci_interactive: bool = False):
+        assert cvci_interactive is True
         del body, request, idempotency_key, require_existing_thread
         return RunRecord(
             run_id="run-live",
@@ -1530,7 +1536,8 @@ async def test_wait_retry_after_later_run_does_not_return_later_checkpoint(monke
     assert reused.store_only is False
     assert reused.status == RunStatus.success
 
-    async def fake_start_run(body, thread_id, request, *, idempotency_key=None, require_existing_thread=False):
+    async def fake_start_run(body, thread_id, request, *, idempotency_key=None, require_existing_thread=False, cvci_interactive: bool = False):
+        assert cvci_interactive is True
         del body, thread_id, request, idempotency_key, require_existing_thread
         return reused
 

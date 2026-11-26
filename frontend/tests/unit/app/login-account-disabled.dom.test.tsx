@@ -46,6 +46,17 @@ const jsonResponse = (body: unknown, status = 200) =>
     headers: { "Content-Type": "application/json" },
   });
 
+const loginRejection = (body: unknown) =>
+  rs.fn(async (input: RequestInfo | URL) =>
+    (typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.href
+        : input.url) === "/api/v1/auth/providers"
+      ? jsonResponse({ providers: [] })
+      : jsonResponse(body, 401),
+  ) as typeof fetch;
+
 beforeEach(() => {
   rs.mocked(useAuth).mockReturnValue({
     isAuthenticated: false,
@@ -73,12 +84,9 @@ function fillAndSubmit() {
 }
 
 test("an account_disabled rejection shows the localized reason", async () => {
-  globalThis.fetch = rs.fn(async () =>
-    jsonResponse(
-      { detail: { code: "account_disabled", message: "Account disabled" } },
-      401,
-    ),
-  ) as unknown as typeof globalThis.fetch;
+  globalThis.fetch = loginRejection({
+    detail: { code: "account_disabled", message: "Account disabled" },
+  });
   render(<LoginPage />);
 
   await waitFor(() => screen.getByRole("button", { name: enUS.login.signIn }));
@@ -90,17 +98,12 @@ test("an account_disabled rejection shows the localized reason", async () => {
 });
 
 test("other rejections keep showing the backend message", async () => {
-  globalThis.fetch = rs.fn(async () =>
-    jsonResponse(
-      {
-        detail: {
-          code: "invalid_credentials",
-          message: "Incorrect email or password",
-        },
-      },
-      401,
-    ),
-  ) as unknown as typeof globalThis.fetch;
+  globalThis.fetch = loginRejection({
+    detail: {
+      code: "invalid_credentials",
+      message: "Incorrect email or password",
+    },
+  });
   render(<LoginPage />);
 
   await waitFor(() => screen.getByRole("button", { name: enUS.login.signIn }));
@@ -127,12 +130,9 @@ test("an ordinary /login visit shows no suspension note", () => {
 });
 
 test("sign-up keeps the backend message so a disabled account cannot be probed", async () => {
-  globalThis.fetch = rs.fn(async () =>
-    jsonResponse(
-      { detail: { code: "account_disabled", message: "Account disabled" } },
-      401,
-    ),
-  ) as unknown as typeof globalThis.fetch;
+  globalThis.fetch = loginRejection({
+    detail: { code: "account_disabled", message: "Account disabled" },
+  });
   render(<LoginPage />);
 
   await waitFor(() => screen.getByRole("button", { name: enUS.login.signIn }));

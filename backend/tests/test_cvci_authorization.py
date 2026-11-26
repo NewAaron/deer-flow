@@ -174,10 +174,12 @@ def test_callback_preserves_uuid_and_failure_has_its_own_page(monkeypatch):
     monkeypatch.setattr(auth, "_oidc_config", AsyncMock(return_value=cfg))
     monkeypatch.setattr(auth, "get_state_cookie", lambda *_: OIDCStatePayload(provider="cvci", state="test-state", nonce="test-nonce", code_verifier="test-verifier"))
     monkeypatch.setattr(auth, "get_local_provider", lambda: object())
-    oidc = SimpleNamespace(discover=AsyncMock(), authenticate_callback=AsyncMock(return_value=_identity()))
+    oidc = SimpleNamespace(discover=AsyncMock(), authenticate_callback=AsyncMock(return_value=replace(_identity(), email="", email_verified=False)))
     monkeypatch.setattr(auth, "_get_oidc_service", lambda: oidc)
     provision = AsyncMock(return_value={"user": SimpleNamespace(id=_OWNER, token_version=7)})
-    monkeypatch.setattr(auth, "get_or_provision_oidc_user", provision)
+    monkeypatch.setattr(auth, "get_or_provision_cvci_user", provision)
+    generic_provision = AsyncMock(side_effect=AssertionError("CVCI must not use email-based provisioning"))
+    monkeypatch.setattr(auth, "get_or_provision_oidc_user", generic_provision)
 
     old_token = create_access_token("old-owner", session_id="old-mock-session-00001")
     with TestClient(app, base_url="https://deerflow.example.test") as client:
@@ -196,3 +198,4 @@ def test_callback_preserves_uuid_and_failure_has_its_own_page(monkeypatch):
         assert failure.status_code == 302 and failure.headers["location"] == "/auth/cvci-failed"
         assert "access_token=" not in "".join(failure.headers.get_list("set-cookie"))
         assert provision.await_count == 1
+        generic_provision.assert_not_awaited()

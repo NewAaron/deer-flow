@@ -38,7 +38,7 @@ def generate_csrf_token() -> str:
     return secrets.token_urlsafe(CSRF_TOKEN_LENGTH)
 
 
-def should_check_csrf(request: Request) -> bool:
+def should_check_csrf(request: Request, *, allow_auth_disabled: bool | None = None) -> bool:
     """Determine if a request needs CSRF validation.
 
     CSRF is checked for state-changing methods (POST, PUT, DELETE, PATCH).
@@ -47,7 +47,7 @@ def should_check_csrf(request: Request) -> bool:
     if request.method not in _CSRF_STATE_CHANGING_METHODS:
         return False
 
-    if is_auth_disabled():
+    if is_auth_disabled() if allow_auth_disabled is None else allow_auth_disabled:
         return False
 
     route_path = get_request_route_path(request)
@@ -66,6 +66,7 @@ _AUTH_EXEMPT_PATHS: frozenset[str] = frozenset(
     {
         "/api/v1/auth/login/local",
         "/api/v1/auth/logout",
+        "/api/v1/auth/logout/cleanup",
         "/api/v1/auth/register",
         "/api/v1/auth/initialize",
     }
@@ -221,14 +222,20 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         _is_auth = is_auth_endpoint(request)
+        allow_auth_disabled = is_auth_disabled()
+        if allow_auth_disabled:
+            from app.gateway.auth.browser_session import browser_auth_policy
 
-        if should_check_csrf(request) and _is_auth and not is_allowed_auth_origin(request):
+            allow_auth_disabled = (await browser_auth_policy(request)).required_oidc_provider is None
+        check_csrf = should_check_csrf(request, allow_auth_disabled=allow_auth_disabled)
+
+        if check_csrf and _is_auth and not is_allowed_auth_origin(request):
             return JSONResponse(
                 status_code=403,
                 content={"detail": "Cross-site auth request denied."},
             )
 
-        if should_check_csrf(request) and not _is_auth and request.headers.get("authorization") is None:
+        if check_csrf and not _is_auth and request.headers.get("authorization") is None:
             # Bearer-authenticated requests (PAT, #4849) are exempt from the
             # cookie double-submit check only — the cross-site origin check on
             # auth endpoints above still runs for every request. Safety rests

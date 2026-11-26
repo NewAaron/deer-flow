@@ -1,6 +1,76 @@
 import { expect, rs, test } from "@rstest/core";
 
+import type { SurfaceContext } from "@/core/extensions/contracts";
 import { mountSurface } from "@/core/extensions/surfaces";
+
+test("surface backend failures retain HTTP status and machine code", async () => {
+  const failure = Object.assign(new Error("Plugin action unavailable (403)"), {
+    status: 403,
+    code: "mcp_read_access_denied",
+  });
+  let callLater!: SurfaceContext["callBackend"];
+  const cleanup = mountSurface(
+    document.createElement("div"),
+    {
+      id: "picker",
+      slot: "composer-picker",
+      title: "Picker",
+      mount(_root, context) {
+        callLater = context.callBackend;
+        return { dispose: rs.fn() };
+      },
+    },
+    {
+      namespace: "cvci-entities",
+      locale: "zh",
+      settings: {},
+      callBackend: rs.fn(async () => {
+        throw failure;
+      }),
+    },
+    rs.fn(),
+  );
+  await expect(callLater("search_subjects", {})).rejects.toBe(failure);
+  cleanup();
+});
+
+test("picker confirmation is revoked with the surface lifetime", async () => {
+  const confirm = rs.fn(async () => undefined);
+  let confirmLater!: NonNullable<SurfaceContext["confirmSelection"]>;
+  const cleanup = mountSurface(
+    document.createElement("div"),
+    {
+      id: "record",
+      slot: "composer-picker",
+      title: "Record",
+      mount(_root, context) {
+        confirmLater = context.confirmSelection!;
+        return { dispose: rs.fn() };
+      },
+    },
+    {
+      namespace: "cvci-entities",
+      locale: "zh",
+      settings: {},
+      callBackend: rs.fn(),
+      confirmSelection: confirm,
+    },
+    rs.fn(),
+  );
+  const selection = {
+    reference: {
+      namespace: "cvci-entities",
+      provider: "vehicle",
+      id: "a",
+      label: "车辆",
+    },
+    text: "查询",
+  };
+  await confirmLater(selection);
+  cleanup();
+  await expect(confirmLater(selection)).rejects.toThrow();
+  expect(confirm).toHaveBeenCalledTimes(1);
+});
 
 test("surface cleanup aborts outstanding work and rejects late backend calls", async () => {
   const container = document.createElement("div");

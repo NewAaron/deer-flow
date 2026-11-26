@@ -460,6 +460,45 @@ To exercise the actual Turbopack development build, start the frontend with
 `PLAYWRIGHT_SKIP_WEB_SERVER=1 pnpm exec playwright test tests/e2e/bookmark-plugin.spec.ts`.
 Set `PLAYWRIGHT_BASE_URL` if the development server uses a port other than 3000.
 
+### Session-bound MCP reads (extension-api 0.2.10)
+
+A backend action may opt into exact deployment tools with
+`BackendAction("search", handler, mcp_reads=(McpReadTool("cvci", "cvci_search_archives"),))`.
+Its browser-session `ActionContext.mcp_reader` offers
+`await reader.call(server, tool, arguments)`, returning a bounded JSON MCP
+`CallToolResult` envelope (`content`, `structuredContent`, `isError`). Other
+callers and actions without declarations receive `None`. Declaration grants no
+user authority: the current host adapter supports only the configured, pinned
+CVCI HTTP endpoint and this Request's live CVCI sid/owner grant. The host requires
+non-destructive read-only tool annotations, keeps credentials behind the
+capability, and expires/cancels the reader when its action ends. Arguments are
+limited to 16 KiB, results to 256 KiB, and each read to ten seconds. Refusals use
+safe `HostCapabilityError` codes; absent CVCI authority is a local action 403,
+not a 401 that signs the user out of unrelated workspace functionality.
+Do not accept a server URL or credentials from action input, or reconstruct a
+grant by looking up a prior session for the principal. Search/selection rules
+belong in the packaged business extension, not the host adapter.
+
+### Request-only model message context (extension-api 0.2.10)
+
+A `MiddlewarePlacement` at `MODEL_LOGICAL` or `MODEL_PHYSICAL` may declare
+`model_message_projection=True` (strict boolean; default false). Its model
+wrapper can pass `request.override(messages=projected)` to its handler, where
+only an append-only text suffix on the final human message is accepted, up to
+16 KiB of UTF-8. Existing string or multimodal content, every other message,
+and all IDs/metadata remain unchanged. The host forwards no replacement
+model, tools, system message, runtime, authentication, settings or graph state.
+Input/output copies detach extension-held references; the suffix never writes
+conversation state. This policy is recorded in the assembly fingerprint.
+
+An opted-in model wrapper can `raise ModelInputRejected()` before invoking its
+handler to reject malformed selected references with a fixed safe message.
+No dynamic error detail is accepted. Ordinary errors remain fail-open; a
+post-handler rejection cannot replay a model/tool operation or replace its
+captured result. Tool wrappers and lifecycle hooks retain their observational
+semantics. Extensions are trusted code; this request contract is not a Python
+sandbox. Put business reference validation/projection in the installed extension.
+
 ### Composer mention providers
 
 An optional `mentionProviders` array on a browser module contributes candidates to

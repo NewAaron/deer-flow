@@ -53,7 +53,8 @@ export default async function DocLayout({ children, params }) {
         // Search lives in the custom Header; Nextra's own mobile menu is never
         // shown, and a second instance would steal the Cmd/Ctrl+K shortcut.
         search={null}
-        docsRepositoryBase="https://github.com/bytedance/deer-flow/tree/main/frontend"
+        editLink={null}
+        feedback={{ content: null }}
         footer={<Footer className="mt-0" />}
         i18n={i18n}
         // ... Your additional layout options

@@ -14,6 +14,7 @@ test.describe("Localized documentation links", () => {
 
     await card.click();
     await expect(page).toHaveURL(/\/en\/docs\/introduction\/why-deerflow$/);
+    await expect(page).toHaveTitle("Why MSAI");
     await expect(page.locator("main h1")).toContainText("Why DeerFlow");
   });
 
@@ -80,19 +81,17 @@ test.describe("Localized documentation links", () => {
     await expect(invalidDocsLinks).toHaveCount(0);
   });
 
-  test("uses valid repository links for documentation feedback and edits", async ({
+  test("omits upstream repository feedback and editing links", async ({
     page,
   }) => {
-    await page.goto("/en/docs/application/quick-start");
-
-    await expect(
-      page.getByRole("link", { name: "Question? Give us feedback" }),
-    ).toHaveAttribute("href", /github\.com\/bytedance\/deer-flow\/issues\/new/);
-    await expect(
-      page.getByRole("link", { name: "Edit this page" }),
-    ).toHaveAttribute(
-      "href",
-      "https://github.com/bytedance/deer-flow/tree/main/frontend/src/content/en/application/quick-start.mdx",
-    );
+    for (const path of ["/en/docs/application/quick-start", "/blog/posts"]) {
+      await page.goto(path);
+      await expect(
+        page.getByRole("link", { name: "Question? Give us feedback" }),
+      ).toHaveCount(0);
+      await expect(
+        page.getByRole("link", { name: "Edit this page" }),
+      ).toHaveCount(0);
+    }
   });
 });

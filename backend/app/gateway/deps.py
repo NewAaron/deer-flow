@@ -1355,9 +1355,11 @@ async def get_current_user_from_request(request: Request):
         return state_user
 
     from app.gateway.auth import decode_token
+    from app.gateway.auth.browser_session import browser_auth_policy, read_browser_token, validate_browser_authorization
     from app.gateway.auth.errors import AuthErrorCode, AuthErrorResponse, TokenError, token_error_to_code
 
-    access_token = request.cookies.get("access_token")
+    policy = await browser_auth_policy(request)
+    access_token = read_browser_token(request.cookies, strict=policy.required_oidc_provider is not None)
     if not access_token:
         raise HTTPException(
             status_code=401,
@@ -1390,6 +1392,7 @@ async def get_current_user_from_request(request: Request):
             detail=AuthErrorResponse(code=error, message="Account disabled" if error is AuthErrorCode.ACCOUNT_DISABLED else "Token revoked (password changed)").model_dump(),
         )
 
+    await validate_browser_authorization(request, user, payload)
     return user
 
 

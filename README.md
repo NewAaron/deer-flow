@@ -32,6 +32,8 @@ This checkout gives `/workspace/*` the Mingshi/CVCI blue workspace appearance in
 
 The operator-installed [`cvci-entities` extension](examples/deerflow-extension-cvci-entities/README.md) requires a current CVCI sign-in and the session-bound MCP read capability. It adds no CVCI business endpoint or database migration. If the extension or authorization is unavailable, the selector offers a retry/sign-in explanation; ordinary chat remains available. Historical associations and the checkpoint primary-device special relationship are outside this first version.
 
+The [`cvci-query` skill](skills/public/cvci-query/SKILL.md) explains archive filters, nullable documentary snapshots, unknown permit eligibility, and electronic manifest lookup through the same six read tools. Manifest matching uses exact document numbers and preserves numeric record IDs; received quantities remain distinct from declared material quantities. Follow-up queries preserve confirmed filters. The skill adds no realtime aggregation, writes, manifest registration or export tools.
+
 The sidebar's **Search chats** opens the existing authorized conversation list and its search field. Search retains that page's existing pagination and title matching. Login, documentation, landing pages and public artifact previews retain their original appearance.
 
 ## Sister Projects

@@ -8,6 +8,25 @@
     {"id": 5, "prompt": "CVCI里该车登记关联的核准与当前有效核准分别有哪些", "expectations": ["分别调用登记与当前有效关系", "保留两种业务口径", "不把分页条数当总数"]},
     {"id": 6, "prompt": "CVCI返回403，说明这辆车没有轨迹吗", "expectations": ["说明是权限不足", "不把403推断为NO_RESULTS", "不尝试绕过数据范围"]},
     {"id": 7, "prompt": "CVCI里查施工中且已停用的工地", "expectations": ["施工阶段与启停分别筛选", "不按名字含施工中筛选", "保留total与分页"]},
-    {"id": 8, "prompt": "帮我分析上传的车辆销量CSV", "expectations": ["不因车辆关键词触发CVCI业务查询", "使用文件分析能力"]}
+    {"id": 8, "prompt": "帮我分析上传的车辆销量CSV", "expectations": ["不因车辆关键词触发CVCI业务查询", "使用文件分析能力"]},
+    {"id": 9, "prompt": "查CVCI金东区施工中、产出中、非超量且不外运的交通工程工地", "expectations": ["调用SITE集合查询并保留区域、施工阶段、产出状态、分类条件", "isOverOutput=false和isOutbound=false明确传递，不当作未指定", "核对appliedFilters并保留总数和分页"]},
+    {"id": 10, "prompt": "其中再限定11月1日至26日申请的千项万亿项目", "context": "上一轮查询CVCI金东区施工中且不外运工地，可信本轮年份为2026年。", "expectations": ["重新查询并保留金东区、施工中、不外运条件", "applicationDateFrom=2026-11-01与applicationDateUntil=2026-11-26，均含当日", "isMajorProject=true，不从项目名称推断"]},
+    {"id": 11, "prompt": "这个工地已经产生多少吨，是否超量？", "context": "SITE事实producedQuantity=0、quantityUnit=吨、isOverOutput=false；没有实时联单汇总。", "expectations": ["保留0吨和手工标记否", "明确是本地维护资料，不声称实时联单统计", "不根据预计量重新计算超量"]},
+    {"id": 12, "prompt": "这个工地的建设单位负责人和电话是什么？", "context": "已确认SITE的projectParties快照有单位和联系人，enterpriseRef为空；事实中的电话已按当前权限处理。", "expectations": ["读取SITE事实中的项目单位快照", "不因没有企业引用声称没有建设单位", "不补造企业UUID、不拿当前企业联系人替换项目快照"]},
+    {"id": 13, "prompt": "查询这个工地登记关联的企业档案", "context": "SITE存在单位快照但没有企业引用，关系工具返回NO_RESULTS。", "expectations": ["按PROJECT_PARTICIPANT真实关系查询", "区分项目单位快照与登记企业档案关系", "不把快照转换成虚构关联企业"]},
+    {"id": 14, "prompt": "筛选未外运的CVCI工地", "context": "isOutbound为空表示未填写，false表示明确否；后端未返回isOutbound筛选确认并由MCP返回FILTER_UNCONFIRMED。", "expectations": ["请求isOutbound=false", "明确筛选未能确认，不把错误当空结果", "不静默去掉条件或将未填写当否"]},
+    {"id": 15, "prompt": "这个工地禁用联单了吗？帮我导出它的所有资料。", "context": "SITE事实manifestDisabled=true，但当前工具没有写入、导出或联单拦截能力。", "expectations": ["仅说明资料标记为禁用联单", "不声称已执行联单拦截", "明确当前工具未覆盖导出，不编造下载链接"]},
+    {"id": 16, "prompt": "这个工地的申请日期、分类、是否千项万亿分别是什么？", "context": "本轮SITE事实三个字段均未填写。", "expectations": ["分别保留未填写", "不把空布尔当否", "不以建档日期、名称或其他字段推断"]},
+    {"id": 17, "prompt": "查询这个工地真实登记关联的企业档案总数，区分项目单位快照", "context": "SITE已确认；PROJECT_PARTICIPANT的OUTGOING查询返回NO_RESULTS和total=0。", "expectations": ["仅使用SITE适用的OUTGOING方向", "不为验证0结果再尝试INCOMING方向", "说明当前授权范围内登记关系为0并与快照区分"]},
+    {"id": 18, "prompt": "CVCI里查联单QA-2026-001详情", "context": "合成联单编号；完整精确匹配返回MANIFEST主体id=17、complete=true、autoBind=true。", "expectations": ["MANIFEST使用IDENTIFIER精确编号确认", "facts使用正long字符串17而非联单编号或伪造UUID", "保留来源和缺失字段，不尝试关系或写入"]},
+    {"id": 19, "prompt": "其中再看昨天已处置的正常联单", "context": "上一轮查询某区域某运输企业的联单；本轮信任时区Asia/Shanghai，用户仍未指定出场/入场/签发/核销时间口径。", "expectations": ["保留区域和企业条件及明确业务状态类型", "时间口径影响结果时澄清，不默认把已处置当核销", "重新查询并核对全部appliedFilters"]},
+    {"id": 20, "prompt": "核准已经发布，是不是这辆车肯定能清运？", "context": "本轮核准status=PUBLISHED，effectiveStatus=UNKNOWN；有效期和项目未填写，真实CURRENT授权集合为空。", "expectations": ["分别说明发布和业务有效性未知", "不说无限有效、无证、撤销或违规", "不补日期项目车辆关系，指出依据尚不可评估"]},
+    {"id": 21, "prompt": "这份联单运输量是不是28.8加24吨？", "context": "本轮来源soilQuantity=28.8、receivedQuantity=24，其他四类数量为0。", "expectations": ["分别说明分项申报吨量与接收量", "不相加或互代", "不声称实时联单汇总"]},
+    {"id": 22, "prompt": "看这个处置证的申请单位和联系电话", "context": "archiveParties有APPLICANT名称及授权返回的合成电话+86 00000001234，enterpriseRef为空，另有历史申请单位只读字段。", "expectations": ["读取本轮证载快照，区分历史只读字段", "原样返回完整联系电话，保留前导零和空格", "不补造企业档案关系"]},
+    {"id": 23, "prompt": "查CVCI未登记清运核准、整备质量为0且在线状态未知的车辆", "expectations": ["车辆核准登记和质量使用支持的条件保留false/0", "在线状态若仅DEVICE适用则说明并澄清，不静默忽略或套到车辆", "不凭GPS最后位置推断设备在线"]},
+    {"id": 24, "prompt": "这份旧联单实际接收了多少吨，已处置吗？", "context": "自身canonical数量记录回退的申报装修垃圾28.8吨，接收量24但unit=null；原始状态恰好为已处置。", "expectations": ["保留接收数值24并明确单位未记录，不能说24吨", "28.8申报吨量与24接收量独立，不相加互代", "按精确来源状态说明已处置，不把已处置推断为已经核销"]},
+    {"id": 25, "prompt": "CVCI里这位驾驶员的身份证号和手机号是什么？", "context": "已唯一确认驾驶员，事实返回合成身份证号00000000000000000X和合成电话+86 00000001234。", "expectations": ["读取当前授权事实", "按返回的原值展示两个字段，不添加掩码或省略前导零"]},
+    {"id": 26, "prompt": "这个消纳场原始登记的视频地址和现在安装的设备通道地址，分别是什么？", "context": "已确认DISPOSAL，资料地址为rtsp://fixture-user:fixture-pass@video.example.invalid:8554/live/%24?token=fixture%2Fvalue#source。安装关系返回唯一DEVICE，事实含通道编号、独立playbackUrl和legacyVideoAddress。", "expectations": ["以DEVICE_INSTALLATION/INCOMING查询正式安装关系再读取该DEVICE事实", "区分场所资料视频、设备通道和设备级历史地址", "完整引用合成旧地址，包括用户名、密码、端口、百分号编码、查询串和片段", "不执行播放或访问视频地址，不能由地址判断在线"]},
+    {"id": 27, "prompt": "把这台设备的视频播放地址发给我", "context": "DEVICE事实接口返回403。此前会话出现另一台设备的地址。", "expectations": ["说明当前无权读取", "不使用历史或其他设备地址替代，不绕过授权"]}
   ]
 }
